@@ -1,0 +1,19 @@
+{
+  "name": "meal-tracker-app",
+  "version": "1.0.0",
+  "description": "AI-powered meal tracking app with macro calculations",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo 'No build step required'",
+    "deploy": "vercel --prod"
+  },
+  "keywords": ["meal-tracker", "nutrition", "ai", "vercel"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.20.0"
+  },
+  "devDependencies": {
+    "vercel": "^33.0.0"
+  }
+}
