@@ -53,15 +53,25 @@
         );
 
         function MealTrackerApp() {
+            const availableModels = [
+                { value: 'claude-sonnet-4-20250514', label: 'Anthropic · Claude Sonnet 4' },
+                { value: 'gpt-4o-mini', label: 'ChatGPT · GPT-4o mini' },
+                { value: 'gemini-1.5-flash', label: 'Gemini · 1.5 Flash' }
+            ];
             const [meals, setMeals] = useState([]);
             const [steps, setSteps] = useState(0);
             const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [selectedModel, setSelectedModel] = useState(availableModels[0].value);
             const [showCamera, setShowCamera] = useState(false);
             const [capturedImage, setCapturedImage] = useState(null);
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
             const fileInputRef = useRef(null);
             const streamRef = useRef(null);
+            const stepListenerRef = useRef(null);
+            const stepCounterActiveRef = useRef(false);
+            const lastMotionYRef = useRef(null);
+            const lastStepTimestampRef = useRef(0);
 
             // Load meals from localStorage on mount
             useEffect(() => {
@@ -110,21 +120,54 @@
             };
 
             const startStepCounting = () => {
-                let lastY = 0;
-                let threshold = 1.2;
-                
-                window.addEventListener('devicemotion', (event) => {
-                    if (event.accelerationIncludingGravity) {
-                        const y = event.accelerationIncludingGravity.y;
-                        if (Math.abs(y - lastY) > threshold) {
-                            const newSteps = steps + 1;
-                            setSteps(newSteps);
-                            localStorage.setItem('dailySteps', newSteps.toString());
-                        }
-                        lastY = y;
+                if (stepCounterActiveRef.current) {
+                    return;
+                }
+
+                const threshold = 1.8;
+                const minStepIntervalMs = 450;
+
+                const onDeviceMotion = (event) => {
+                    const acceleration = event.accelerationIncludingGravity;
+                    if (!acceleration || typeof acceleration.y !== 'number') {
+                        return;
                     }
-                });
+
+                    const y = acceleration.y;
+
+                    // Prime baseline on first reading to avoid false +1 step when enabling.
+                    if (lastMotionYRef.current === null) {
+                        lastMotionYRef.current = y;
+                        return;
+                    }
+
+                    const delta = Math.abs(y - lastMotionYRef.current);
+                    const now = Date.now();
+
+                    if (delta > threshold && now - lastStepTimestampRef.current >= minStepIntervalMs) {
+                        lastStepTimestampRef.current = now;
+                        setSteps((prevSteps) => {
+                            const nextSteps = prevSteps + 1;
+                            localStorage.setItem('dailySteps', nextSteps.toString());
+                            return nextSteps;
+                        });
+                    }
+
+                    lastMotionYRef.current = y;
+                };
+
+                stepListenerRef.current = onDeviceMotion;
+                stepCounterActiveRef.current = true;
+                window.addEventListener('devicemotion', onDeviceMotion);
             };
+
+            useEffect(() => {
+                return () => {
+                    if (stepListenerRef.current) {
+                        window.removeEventListener('devicemotion', stepListenerRef.current);
+                    }
+                };
+            }, []);
 
             const startCamera = async () => {
                 try {
@@ -198,7 +241,7 @@
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({ imageData })
+                        body: JSON.stringify({ imageData, model: selectedModel })
                     });
 
                     if (!response.ok) {
@@ -285,6 +328,24 @@
                                     <p className="text-xs text-green-600 font-medium">Fiber</p>
                                     <p className="text-xl font-bold text-green-900">{Math.round(todaysTotals.fiber)}g</p>
                                 </div>
+                            </div>
+
+                            <div className="mb-4">
+                                <label htmlFor="model-select" className="block text-sm font-medium text-gray-700 mb-2">
+                                    AI Model
+                                </label>
+                                <select
+                                    id="model-select"
+                                    value={selectedModel}
+                                    onChange={(event) => setSelectedModel(event.target.value)}
+                                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
+                                >
+                                    {availableModels.map((modelOption) => (
+                                        <option key={modelOption.value} value={modelOption.value}>
+                                            {modelOption.label}
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
 
                             {/* Action Buttons */}
