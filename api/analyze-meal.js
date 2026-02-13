@@ -10,13 +10,11 @@ module.exports = async (req, res) => {
     'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
   );
 
-  // Handle preflight request
   if (req.method === 'OPTIONS') {
     res.status(200).end();
     return;
   }
 
-  // Only allow POST requests
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -28,20 +26,17 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'No image data provided' });
     }
 
-    // Check if API key exists
     if (!process.env.ANTHROPIC_API_KEY) {
-      return res.status(500).json({ 
+      return res.status(500).json({
         error: 'Server configuration error',
-        message: 'ANTHROPIC_API_KEY not configured. Please add it in Vercel environment variables.'
+        message: 'ANTHROPIC_API_KEY not configured'
       });
     }
 
-    // Initialize Anthropic client
     const anthropic = new Anthropic({
       apiKey: process.env.ANTHROPIC_API_KEY,
     });
 
-    // Remove data URL prefix if present
     const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
 
     const message = await anthropic.messages.create({
@@ -61,18 +56,10 @@ module.exports = async (req, res) => {
             },
             {
               type: 'text',
-              text: `Analyze this meal image and provide nutritional estimates in JSON format only. Identify all food items visible and estimate their quantities. Return ONLY a JSON object with this exact structure, no other text:
-{
-  "name": "brief meal description",
-  "items": ["item1", "item2"],
-  "calories": number,
-  "protein": number,
-  "carbs": number,
-  "fat": number,
-  "fiber": number
-}
+              text: `Analyze this meal image and provide nutritional estimates. Return ONLY valid JSON with this structure (no markdown, no backticks, no extra text):
+{"name":"meal description","items":["item1","item2"],"calories":350,"protein":25,"carbs":40,"fat":15,"fiber":5}
 
-All macro values should be in grams except calories. Be as accurate as possible based on portion sizes visible.`,
+All values must be numbers (no units in the JSON). Protein, carbs, fat, fiber in grams.`,
             },
           ],
         },
@@ -81,39 +68,51 @@ All macro values should be in grams except calories. Be as accurate as possible 
 
     const content = message.content.find((item) => item.type === 'text')?.text || '';
     
-    // Try multiple parsing strategies
-    let nutritionData = null;
+    // Remove any markdown formatting
+    let cleanContent = content
+      .replace(/```json\s*/gi, '')
+      .replace(/```\s*/g, '')
+      .trim();
     
-    // Strategy 1: Remove markdown code blocks and parse
-    let cleanContent = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    // Extract JSON
+    const jsonMatch = cleanContent.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/);
     
-    // Strategy 2: Extract JSON object
-    const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
-    
-    if (jsonMatch) {
-      try {
-        nutritionData = JSON.parse(jsonMatch[0]);
-      } catch (parseError) {
-        console.error('JSON parse error:', parseError);
-        console.error('Content:', content);
-        throw new Error('Could not parse nutrition data from AI response');
-      }
-    } else {
-      console.error('No JSON found in response:', content);
-      throw new Error('Could not find JSON in AI response');
+    if (!jsonMatch) {
+      console.error('No JSON found. Response:', content);
+      return res.status(500).json({
+        error: 'Failed to parse response',
+        message: 'AI response did not contain valid JSON'
+      });
     }
-    
-    // Validate the required fields
-    if (!nutritionData.name || !nutritionData.calories) {
-      throw new Error('Invalid nutrition data structure');
+
+    let nutritionData;
+    try {
+      nutritionData = JSON.parse(jsonMatch[0]);
+    } catch (parseError) {
+      console.error('Parse error:', parseError);
+      console.error('Attempted to parse:', jsonMatch[0]);
+      return res.status(500).json({
+        error: 'Failed to parse nutrition data',
+        message: parseError.message
+      });
     }
-    
+
+    // Validate required fields
+    if (!nutritionData.name || typeof nutritionData.calories !== 'number') {
+      console.error('Invalid data structure:', nutritionData);
+      return res.status(500).json({
+        error: 'Invalid nutrition data',
+        message: 'Missing required fields'
+      });
+    }
+
     res.status(200).json(nutritionData);
+
   } catch (error) {
     console.error('Analysis error:', error);
-    res.status(500).json({ 
-      error: 'Failed to analyze meal', 
-      message: error.message 
+    res.status(500).json({
+      error: 'Failed to analyze meal',
+      message: error.message
     });
   }
 };
