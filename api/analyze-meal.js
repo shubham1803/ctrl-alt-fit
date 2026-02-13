@@ -11,9 +11,14 @@ const MODEL_CONFIG = {
     model: 'gpt-4o-mini',
     envKey: 'OPENAI_API_KEY',
   },
+  'gemini-2.0-flash': {
+    provider: 'gemini',
+    model: 'gemini-2.0-flash',
+    envKey: 'GEMINI_API_KEY',
+  },
   'gemini-1.5-flash': {
     provider: 'gemini',
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.0-flash',
     envKey: 'GEMINI_API_KEY',
   },
 };
@@ -95,8 +100,8 @@ const analyzeWithOpenAI = async (apiKey, model, imageData) => {
   return data?.choices?.[0]?.message?.content || '';
 };
 
-const analyzeWithGemini = async (apiKey, model, base64Data) => {
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+const callGeminiGenerateContent = async (apiKey, model, base64Data) => {
+  return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -111,14 +116,64 @@ const analyzeWithGemini = async (apiKey, model, base64Data) => {
       },
     }),
   });
+};
 
+const extractGeminiText = (data) => {
+  const parts = data?.candidates?.[0]?.content?.parts || [];
+  return parts.find((part) => typeof part?.text === 'string')?.text || '';
+};
+
+const listGeminiModels = async (apiKey) => {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
   if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Gemini error (${response.status}): ${errText.substring(0, 200)}`);
+    return [];
   }
 
   const data = await response.json();
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  return (data.models || [])
+    .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+    .map((m) => String(m.name || '').replace(/^models\//, ''));
+};
+
+const chooseGeminiFallbackModel = (availableModels) => {
+  const preferred = [
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-exp',
+    'gemini-1.5-flash-002',
+    'gemini-1.5-flash-latest',
+  ];
+
+  for (const candidate of preferred) {
+    if (availableModels.includes(candidate)) {
+      return candidate;
+    }
+  }
+
+  return availableModels.find((m) => m.includes('flash')) || availableModels[0] || null;
+};
+
+const analyzeWithGemini = async (apiKey, model, base64Data) => {
+  let response = await callGeminiGenerateContent(apiKey, model, base64Data);
+
+  if (!response.ok) {
+    // Handle model deprecations or unavailable model IDs by trying a supported fallback.
+    if (response.status === 404) {
+      const availableModels = await listGeminiModels(apiKey);
+      const fallbackModel = chooseGeminiFallbackModel(availableModels);
+
+      if (fallbackModel && fallbackModel !== model) {
+        response = await callGeminiGenerateContent(apiKey, fallbackModel, base64Data);
+      }
+    }
+  }
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Gemini error (${response.status}): ${errText.substring(0, 300)}`);
+  }
+
+  const data = await response.json();
+  return extractGeminiText(data);
 };
 
 module.exports = async (req, res) => {
