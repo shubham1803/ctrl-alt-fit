@@ -15,7 +15,7 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { imageData } = req.body;
+    const { imageData, model } = req.body;
 
     if (!imageData) {
       return res.status(400).json({ error: 'No image data provided' });
@@ -28,6 +28,13 @@ module.exports = async (req, res) => {
       });
     }
 
+    const allowedModels = new Set([
+      'claude-sonnet-4-20250514',
+      'claude-3-5-haiku-latest',
+    ]);
+
+    const selectedModel = allowedModels.has(model) ? model : 'claude-sonnet-4-20250514';
+
     const anthropic = new Anthropic({
       apiKey: process.env.ANTHROPIC_API_KEY,
     });
@@ -35,7 +42,7 @@ module.exports = async (req, res) => {
     const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
 
     const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: selectedModel,
       max_tokens: 1000,
       messages: [{
         role: 'user',

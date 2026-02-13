@@ -53,9 +53,14 @@
         );
 
         function MealTrackerApp() {
+            const availableModels = [
+                { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4 (high accuracy)' },
+                { value: 'claude-3-5-haiku-latest', label: 'Claude 3.5 Haiku (lower cost)' }
+            ];
             const [meals, setMeals] = useState([]);
             const [steps, setSteps] = useState(0);
             const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [selectedModel, setSelectedModel] = useState(availableModels[0].value);
             const [showCamera, setShowCamera] = useState(false);
             const [capturedImage, setCapturedImage] = useState(null);
             const videoRef = useRef(null);
@@ -198,7 +203,7 @@
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({ imageData })
+                        body: JSON.stringify({ imageData, model: selectedModel })
                     });
 
                     if (!response.ok) {
@@ -285,6 +290,24 @@
                                     <p className="text-xs text-green-600 font-medium">Fiber</p>
                                     <p className="text-xl font-bold text-green-900">{Math.round(todaysTotals.fiber)}g</p>
                                 </div>
+                            </div>
+
+                            <div className="mb-4">
+                                <label htmlFor="model-select" className="block text-sm font-medium text-gray-700 mb-2">
+                                    AI Model
+                                </label>
+                                <select
+                                    id="model-select"
+                                    value={selectedModel}
+                                    onChange={(event) => setSelectedModel(event.target.value)}
+                                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
+                                >
+                                    {availableModels.map((modelOption) => (
+                                        <option key={modelOption.value} value={modelOption.value}>
+                                            {modelOption.label}
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
 
                             {/* Action Buttons */}
