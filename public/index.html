@@ -68,6 +68,10 @@
             const canvasRef = useRef(null);
             const fileInputRef = useRef(null);
             const streamRef = useRef(null);
+            const stepListenerRef = useRef(null);
+            const stepCounterActiveRef = useRef(false);
+            const lastMotionYRef = useRef(null);
+            const lastStepTimestampRef = useRef(0);
 
             // Load meals from localStorage on mount
             useEffect(() => {
@@ -116,21 +120,54 @@
             };
 
             const startStepCounting = () => {
-                let lastY = 0;
-                let threshold = 1.2;
-                
-                window.addEventListener('devicemotion', (event) => {
-                    if (event.accelerationIncludingGravity) {
-                        const y = event.accelerationIncludingGravity.y;
-                        if (Math.abs(y - lastY) > threshold) {
-                            const newSteps = steps + 1;
-                            setSteps(newSteps);
-                            localStorage.setItem('dailySteps', newSteps.toString());
-                        }
-                        lastY = y;
+                if (stepCounterActiveRef.current) {
+                    return;
+                }
+
+                const threshold = 1.8;
+                const minStepIntervalMs = 450;
+
+                const onDeviceMotion = (event) => {
+                    const acceleration = event.accelerationIncludingGravity;
+                    if (!acceleration || typeof acceleration.y !== 'number') {
+                        return;
                     }
-                });
+
+                    const y = acceleration.y;
+
+                    // Prime baseline on first reading to avoid false +1 step when enabling.
+                    if (lastMotionYRef.current === null) {
+                        lastMotionYRef.current = y;
+                        return;
+                    }
+
+                    const delta = Math.abs(y - lastMotionYRef.current);
+                    const now = Date.now();
+
+                    if (delta > threshold && now - lastStepTimestampRef.current >= minStepIntervalMs) {
+                        lastStepTimestampRef.current = now;
+                        setSteps((prevSteps) => {
+                            const nextSteps = prevSteps + 1;
+                            localStorage.setItem('dailySteps', nextSteps.toString());
+                            return nextSteps;
+                        });
+                    }
+
+                    lastMotionYRef.current = y;
+                };
+
+                stepListenerRef.current = onDeviceMotion;
+                stepCounterActiveRef.current = true;
+                window.addEventListener('devicemotion', onDeviceMotion);
             };
+
+            useEffect(() => {
+                return () => {
+                    if (stepListenerRef.current) {
+                        window.removeEventListener('devicemotion', stepListenerRef.current);
+                    }
+                };
+            }, []);
 
             const startCamera = async () => {
                 try {
