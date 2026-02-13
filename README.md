@@ -205,3 +205,4 @@ Having issues? Check:
 ---
 
 Built with ❤️ using Claude AI, React, and Vercel
+
