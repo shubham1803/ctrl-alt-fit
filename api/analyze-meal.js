@@ -81,14 +81,34 @@ All macro values should be in grams except calories. Be as accurate as possible 
 
     const content = message.content.find((item) => item.type === 'text')?.text || '';
     
-    // Extract JSON from response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    // Try multiple parsing strategies
+    let nutritionData = null;
+    
+    // Strategy 1: Remove markdown code blocks and parse
+    let cleanContent = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    
+    // Strategy 2: Extract JSON object
+    const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
+    
     if (jsonMatch) {
-      const nutritionData = JSON.parse(jsonMatch[0]);
-      res.status(200).json(nutritionData);
+      try {
+        nutritionData = JSON.parse(jsonMatch[0]);
+      } catch (parseError) {
+        console.error('JSON parse error:', parseError);
+        console.error('Content:', content);
+        throw new Error('Could not parse nutrition data from AI response');
+      }
     } else {
-      throw new Error('Could not parse nutrition data from AI response');
+      console.error('No JSON found in response:', content);
+      throw new Error('Could not find JSON in AI response');
     }
+    
+    // Validate the required fields
+    if (!nutritionData.name || !nutritionData.calories) {
+      throw new Error('Invalid nutrition data structure');
+    }
+    
+    res.status(200).json(nutritionData);
   } catch (error) {
     console.error('Analysis error:', error);
     res.status(500).json({ 
