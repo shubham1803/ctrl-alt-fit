@@ -1,18 +1,13 @@
 const Anthropic = require('@anthropic-ai/sdk');
 
 module.exports = async (req, res) => {
-  // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
-  );
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
   if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
+    return res.status(200).end();
   }
 
   if (req.method !== 'POST') {
@@ -42,77 +37,85 @@ module.exports = async (req, res) => {
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1000,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: {
-                type: 'base64',
-                media_type: 'image/jpeg',
-                data: base64Data,
-              },
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: 'image/jpeg',
+              data: base64Data,
             },
-            {
-              type: 'text',
-              text: `Analyze this meal image and provide nutritional estimates. Return ONLY valid JSON with this structure (no markdown, no backticks, no extra text):
-{"name":"meal description","items":["item1","item2"],"calories":350,"protein":25,"carbs":40,"fat":15,"fiber":5}
-
-All values must be numbers (no units in the JSON). Protein, carbs, fat, fiber in grams.`,
-            },
-          ],
-        },
-      ],
+          },
+          {
+            type: 'text',
+            text: 'Analyze this food image. Respond with ONLY a valid JSON object, nothing else. Use this exact format:\n\n{"name":"description of meal","items":["food1","food2"],"calories":400,"protein":30,"carbs":45,"fat":18,"fiber":6}\n\nAll numbers must be integers. No text before or after the JSON.',
+          },
+        ],
+      }],
     });
 
-    const content = message.content.find((item) => item.type === 'text')?.text || '';
+    let responseText = message.content.find(item => item.type === 'text')?.text || '';
     
-    // Remove any markdown formatting
-    let cleanContent = content
-      .replace(/```json\s*/gi, '')
-      .replace(/```\s*/g, '')
-      .trim();
+    // Log the raw response for debugging
+    console.log('Raw AI response:', responseText);
     
-    // Extract JSON
-    const jsonMatch = cleanContent.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/);
+    // Strip everything except the JSON object
+    responseText = responseText.trim();
     
-    if (!jsonMatch) {
-      console.error('No JSON found. Response:', content);
-      return res.status(500).json({
-        error: 'Failed to parse response',
-        message: 'AI response did not contain valid JSON'
+    // Remove markdown code blocks if present
+    responseText = responseText.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '');
+    
+    // Find the first { and last }
+    const firstBrace = responseText.indexOf('{');
+    const lastBrace = responseText.lastIndexOf('}');
+    
+    if (firstBrace === -1 || lastBrace === -1) {
+      console.error('No JSON braces found in:', responseText);
+      return res.status(500).json({ 
+        error: 'Invalid AI response',
+        message: 'Could not find JSON in response',
+        debug: responseText.substring(0, 200)
       });
     }
-
+    
+    const jsonStr = responseText.substring(firstBrace, lastBrace + 1);
+    console.log('Extracted JSON string:', jsonStr);
+    
     let nutritionData;
     try {
-      nutritionData = JSON.parse(jsonMatch[0]);
+      nutritionData = JSON.parse(jsonStr);
     } catch (parseError) {
-      console.error('Parse error:', parseError);
-      console.error('Attempted to parse:', jsonMatch[0]);
-      return res.status(500).json({
-        error: 'Failed to parse nutrition data',
-        message: parseError.message
+      console.error('JSON parse failed:', parseError.message);
+      console.error('Tried to parse:', jsonStr);
+      return res.status(500).json({ 
+        error: 'JSON parse error',
+        message: parseError.message,
+        debug: jsonStr.substring(0, 200)
       });
     }
 
-    // Validate required fields
-    if (!nutritionData.name || typeof nutritionData.calories !== 'number') {
-      console.error('Invalid data structure:', nutritionData);
-      return res.status(500).json({
-        error: 'Invalid nutrition data',
-        message: 'Missing required fields'
-      });
-    }
+    // Ensure all required fields exist with defaults
+    const result = {
+      name: nutritionData.name || 'Unknown meal',
+      items: Array.isArray(nutritionData.items) ? nutritionData.items : [],
+      calories: Number(nutritionData.calories) || 0,
+      protein: Number(nutritionData.protein) || 0,
+      carbs: Number(nutritionData.carbs) || 0,
+      fat: Number(nutritionData.fat) || 0,
+      fiber: Number(nutritionData.fiber) || 0
+    };
 
-    res.status(200).json(nutritionData);
+    console.log('Returning nutrition data:', result);
+    return res.status(200).json(result);
 
   } catch (error) {
     console.error('Analysis error:', error);
-    res.status(500).json({
-      error: 'Failed to analyze meal',
-      message: error.message
+    return res.status(500).json({ 
+      error: 'Failed to analyze meal', 
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
