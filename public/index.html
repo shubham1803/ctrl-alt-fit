@@ -108,6 +108,7 @@
             const [authError, setAuthError] = useState('');
             const [authConfigLoading, setAuthConfigLoading] = useState(true);
             const [googleClientId, setGoogleClientId] = useState(window.GOOGLE_CLIENT_ID || '');
+            const [profileMenuOpen, setProfileMenuOpen] = useState(false);
             const [selectedMealType, setSelectedMealType] = useState('breakfast');
             const [showCamera, setShowCamera] = useState(false);
             const [capturedImage, setCapturedImage] = useState(null);
@@ -115,6 +116,7 @@
             const canvasRef = useRef(null);
             const fileInputRef = useRef(null);
             const googleButtonRef = useRef(null);
+            const profileMenuRef = useRef(null);
             const streamRef = useRef(null);
             const stepListenerRef = useRef(null);
             const stepCounterActiveRef = useRef(false);
@@ -241,7 +243,23 @@
                 }
                 localStorage.removeItem('userProfile');
                 setUserProfile(null);
+                setProfileMenuOpen(false);
             };
+
+            useEffect(() => {
+                const onClickOutside = (event) => {
+                    if (!profileMenuRef.current) {
+                        return;
+                    }
+
+                    if (!profileMenuRef.current.contains(event.target)) {
+                        setProfileMenuOpen(false);
+                    }
+                };
+
+                window.addEventListener('click', onClickOutside);
+                return () => window.removeEventListener('click', onClickOutside);
+            }, []);
 
             // Load meals from localStorage on mount
             useEffect(() => {
@@ -553,6 +571,14 @@
                 fat: acc.fat + (meal.fat || 0),
                 fiber: acc.fiber + (meal.fiber || 0)
             }), { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 });
+            const currentDateLabel = now.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
+            const caloriesBurnedEstimate = Math.round(steps * 0.04);
+            const firstName = (userProfile?.given_name || userProfile?.name || 'User').split(' ')[0];
+
+            const handleEditProfile = () => {
+                alert('Profile editing will be available soon.');
+                setProfileMenuOpen(false);
+            };
 
             return (
                 <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50">
@@ -562,32 +588,50 @@
                             <div className="flex flex-col gap-4 mb-4 md:flex-row md:items-start md:justify-between">
                                 <div className="flex items-center gap-3">
                                     <CtrlAltFitLogo className="h-11 w-11 shrink-0" />
-                                    <h1 className="text-3xl font-bold text-gray-800">CTRL-ALT-FIT</h1>
+                                    <div>
+                                        <h1 className="text-3xl font-bold text-gray-800">CTRL-ALT-FIT</h1>
+                                        <p className="text-sm font-medium text-gray-700">Welcome, {firstName}</p>
+                                        <p className="text-sm text-gray-500">{currentDateLabel}</p>
+                                    </div>
                                 </div>
 
-                                <div className="md:text-right">
-                                    <div className="inline-flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+                                <div className="relative md:text-right" ref={profileMenuRef}>
+                                    <button
+                                        onClick={() => setProfileMenuOpen((prev) => !prev)}
+                                        className="inline-flex items-center justify-center rounded-full ring-2 ring-gray-200 hover:ring-green-300 transition-all"
+                                    >
                                         {userProfile.picture ? (
                                             <img src={userProfile.picture} alt={userProfile.name || 'User'} className="h-10 w-10 rounded-full object-cover" />
                                         ) : (
                                             <div className="h-10 w-10 rounded-full bg-gray-300"></div>
                                         )}
-                                        <div className="text-left">
-                                            <p className="text-sm font-semibold text-gray-800">{userProfile.name || 'Signed in user'}</p>
-                                            <p className="text-xs text-gray-600">{userProfile.email || ''}</p>
+                                    </button>
+
+                                    {profileMenuOpen && (
+                                        <div className="absolute right-0 mt-2 w-48 rounded-xl border border-gray-200 bg-white shadow-lg z-20 overflow-hidden text-left">
+                                            <div className="px-3 py-2 border-b border-gray-100">
+                                                <p className="text-sm font-semibold text-gray-800 truncate">{userProfile.name || 'Signed in user'}</p>
+                                                <p className="text-xs text-gray-600 truncate">{userProfile.email || ''}</p>
+                                            </div>
+                                            <button
+                                                onClick={handleEditProfile}
+                                                className="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 text-left"
+                                            >
+                                                Edit Profile
+                                            </button>
                                             <button
                                                 onClick={signOut}
-                                                className="mt-1 text-xs font-medium text-red-600 hover:text-red-700"
+                                                className="w-full px-3 py-2 text-sm text-red-600 hover:bg-red-50 text-left"
                                             >
                                                 Sign out
                                             </button>
                                         </div>
-                                    </div>
+                                    )}
                                 </div>
                             </div>
                             
                             {/* Daily Summary Cards */}
-                            <div className="grid grid-cols-2 gap-4 mb-4">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                                 <div className="bg-gradient-to-br from-orange-100 to-orange-200 rounded-xl p-4">
                                     <div className="flex items-center justify-between">
                                         <div>
@@ -605,6 +649,17 @@
                                             <p className="text-3xl font-bold text-blue-900">{steps.toLocaleString()}</p>
                                         </div>
                                         <Footprints size={32} className="text-blue-600" />
+                                    </div>
+                                </div>
+
+                                <div className="bg-gradient-to-br from-emerald-100 to-emerald-200 rounded-xl p-4">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-emerald-700 text-sm font-medium">Calories Burned</p>
+                                            <p className="text-3xl font-bold text-emerald-900">{caloriesBurnedEstimate}</p>
+                                            <p className="text-xs text-emerald-700 mt-1">Estimated from steps</p>
+                                        </div>
+                                        <TrendingUp size={32} className="text-emerald-600" />
                                     </div>
                                 </div>
                             </div>
