@@ -69,9 +69,18 @@
         );
 
         function MealTrackerApp() {
+            const mealTypes = [
+                { id: 'breakfast', label: 'Breakfast', icon: '🌅' },
+                { id: 'lunch', label: 'Lunch', icon: '☀️' },
+                { id: 'snack', label: 'Snack', icon: '🍎' },
+                { id: 'dinner', label: 'Dinner', icon: '🌙' },
+                { id: 'other', label: 'Other', icon: '🍽️' },
+            ];
+            const mealTypeMap = Object.fromEntries(mealTypes.map((type) => [type.id, type]));
             const [meals, setMeals] = useState([]);
             const [steps, setSteps] = useState(0);
             const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [selectedMealType, setSelectedMealType] = useState('breakfast');
             const [showCamera, setShowCamera] = useState(false);
             const [capturedImage, setCapturedImage] = useState(null);
             const videoRef = useRef(null);
@@ -87,7 +96,23 @@
             useEffect(() => {
                 const savedMeals = localStorage.getItem('meals');
                 if (savedMeals) {
-                    setMeals(JSON.parse(savedMeals));
+                    try {
+                        const parsedMeals = JSON.parse(savedMeals);
+                        const normalizedMeals = Array.isArray(parsedMeals) ? parsedMeals.map((meal) => {
+                            const fallbackDate = typeof meal?.id === 'number' ? new Date(meal.id) : new Date();
+                            const fallbackIso = Number.isNaN(fallbackDate.getTime()) ? new Date().toISOString() : fallbackDate.toISOString();
+
+                            return {
+                                ...meal,
+                                mealType: meal?.mealType || 'other',
+                                createdAt: meal?.createdAt || fallbackIso,
+                            };
+                        }) : [];
+                        setMeals(normalizedMeals);
+                    } catch (error) {
+                        console.error('Failed to parse saved meals:', error);
+                        setMeals([]);
+                    }
                 }
             }, []);
 
@@ -260,10 +285,13 @@
                     }
 
                     const nutritionData = await response.json();
+                    const now = new Date();
                     
                     const newMeal = {
-                        id: Date.now(),
-                        timestamp: new Date().toLocaleString(),
+                        id: now.getTime(),
+                        createdAt: now.toISOString(),
+                        timestamp: now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+                        mealType: selectedMealType,
                         image: imageData,
                         ...nutritionData
                     };
@@ -282,7 +310,44 @@
                 setMeals(prev => prev.filter(meal => meal.id !== id));
             };
 
-            const todaysTotals = meals.reduce((acc, meal) => ({
+            const getMealDate = (meal) => {
+                const candidates = [meal?.createdAt, meal?.timestamp];
+                if (typeof meal?.id === 'number') {
+                    candidates.push(meal.id);
+                }
+
+                for (const value of candidates) {
+                    const parsed = new Date(value);
+                    if (!Number.isNaN(parsed.getTime())) {
+                        return parsed;
+                    }
+                }
+
+                return new Date();
+            };
+
+            const isSameDay = (left, right) => (
+                left.getFullYear() === right.getFullYear() &&
+                left.getMonth() === right.getMonth() &&
+                left.getDate() === right.getDate()
+            );
+
+            const now = new Date();
+            const todaysMeals = meals.filter((meal) => isSameDay(getMealDate(meal), now));
+            const todaysMealsSorted = [...todaysMeals].sort((a, b) => getMealDate(b) - getMealDate(a));
+            const selectedMealTypeMeta = mealTypeMap[selectedMealType] || mealTypeMap.other;
+            const todaysCountByType = mealTypes.reduce((acc, type) => {
+                acc[type.id] = todaysMeals.filter((meal) => (meal.mealType || 'other') === type.id).length;
+                return acc;
+            }, {});
+
+            const groupedMeals = mealTypes.map((type) => {
+                const entries = todaysMealsSorted.filter((meal) => (meal.mealType || 'other') === type.id);
+                const calories = entries.reduce((sum, meal) => sum + (Number(meal.calories) || 0), 0);
+                return { ...type, entries, calories };
+            }).filter((group) => group.entries.length > 0);
+
+            const todaysTotals = todaysMeals.reduce((acc, meal) => ({
                 calories: acc.calories + (meal.calories || 0),
                 protein: acc.protein + (meal.protein || 0),
                 carbs: acc.carbs + (meal.carbs || 0),
@@ -347,6 +412,30 @@
                                 AI Model: Gemini 2.5 Flash-Lite (Free Tier)
                             </div>
 
+                            <div className="mb-4">
+                                <p className="text-sm font-semibold text-gray-700 mb-2">Log This As</p>
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                                    {mealTypes.map((mealType) => {
+                                        const isActive = selectedMealType === mealType.id;
+                                        const count = todaysCountByType[mealType.id] || 0;
+                                        return (
+                                            <button
+                                                key={mealType.id}
+                                                onClick={() => setSelectedMealType(mealType.id)}
+                                                className={`rounded-xl border px-3 py-2 text-left transition-all ${
+                                                    isActive
+                                                        ? 'border-green-500 bg-green-50 shadow-sm'
+                                                        : 'border-gray-200 bg-white hover:border-green-300'
+                                                }`}
+                                            >
+                                                <p className="text-sm font-semibold text-gray-800">{mealType.icon} {mealType.label}</p>
+                                                <p className="text-xs text-gray-500">{count} today</p>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
                             {/* Action Buttons */}
                             <div className="grid grid-cols-2 gap-3">
                                 <button
@@ -354,7 +443,7 @@
                                     className="bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl py-3 px-4 font-semibold flex items-center justify-center gap-2 hover:from-green-600 hover:to-green-700 transition-all shadow-md"
                                 >
                                     <Camera size={20} />
-                                    Scan Meal
+                                    Scan {selectedMealTypeMeta.label}
                                 </button>
                                 
                                 <button
@@ -362,7 +451,7 @@
                                     className="bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl py-3 px-4 font-semibold flex items-center justify-center gap-2 hover:from-blue-600 hover:to-blue-700 transition-all shadow-md"
                                 >
                                     <Plus size={20} />
-                                    Upload Photo
+                                    Upload {selectedMealTypeMeta.label}
                                 </button>
                             </div>
 
@@ -460,62 +549,72 @@
 
                         {/* Meals List */}
                         <div className="space-y-4">
-                            {meals.map(meal => (
-                                <div key={meal.id} className="bg-white rounded-2xl shadow-lg overflow-hidden">
-                                    <div className="relative">
-                                        <img 
-                                            src={meal.image} 
-                                            alt={meal.name}
-                                            className="w-full h-48 object-cover"
-                                        />
-                                        <button
-                                            onClick={() => deleteMeal(meal.id)}
-                                            className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-2 hover:bg-red-600 transition-colors"
-                                        >
-                                            <X size={16} />
-                                        </button>
+                            {groupedMeals.map((group) => (
+                                <div key={group.id} className="bg-white rounded-2xl shadow-lg overflow-hidden">
+                                    <div className="bg-gradient-to-r from-gray-50 to-slate-50 border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+                                        <h2 className="text-base font-bold text-gray-800">{group.icon} {group.label}</h2>
+                                        <p className="text-sm text-gray-600">{group.entries.length} meal{group.entries.length > 1 ? 's' : ''} • {Math.round(group.calories)} kcal</p>
                                     </div>
-                                    <div className="p-4">
-                                        <h3 className="font-bold text-lg text-gray-800 mb-1">{meal.name}</h3>
-                                        <p className="text-sm text-gray-500 mb-3">{meal.timestamp}</p>
-                                        
-                                        {meal.items && (
-                                            <p className="text-sm text-gray-600 mb-3">
-                                                <span className="font-medium">Items:</span> {meal.items.join(', ')}
-                                            </p>
-                                        )}
-                                        
-                                        <div className="grid grid-cols-5 gap-2">
-                                            <div className="text-center bg-orange-50 rounded-lg p-2">
-                                                <p className="text-xs text-orange-600 font-medium">Calories</p>
-                                                <p className="text-lg font-bold text-orange-900">{Math.round(meal.calories)}</p>
+                                    <div className="p-4 space-y-4">
+                                        {group.entries.map((meal) => (
+                                            <div key={meal.id} className="rounded-xl border border-gray-200 overflow-hidden">
+                                                <div className="relative">
+                                                    <img 
+                                                        src={meal.image} 
+                                                        alt={meal.name}
+                                                        className="w-full h-48 object-cover"
+                                                    />
+                                                    <button
+                                                        onClick={() => deleteMeal(meal.id)}
+                                                        className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-2 hover:bg-red-600 transition-colors"
+                                                    >
+                                                        <X size={16} />
+                                                    </button>
+                                                </div>
+                                                <div className="p-4">
+                                                    <h3 className="font-bold text-lg text-gray-800 mb-1">{meal.name}</h3>
+                                                    <p className="text-sm text-gray-500 mb-3">{meal.timestamp || getMealDate(meal).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
+                                                    
+                                                    {meal.items && meal.items.length > 0 && (
+                                                        <p className="text-sm text-gray-600 mb-3">
+                                                            <span className="font-medium">Items:</span> {meal.items.join(', ')}
+                                                        </p>
+                                                    )}
+                                                    
+                                                    <div className="grid grid-cols-5 gap-2">
+                                                        <div className="text-center bg-orange-50 rounded-lg p-2">
+                                                            <p className="text-xs text-orange-600 font-medium">Calories</p>
+                                                            <p className="text-lg font-bold text-orange-900">{Math.round(meal.calories)}</p>
+                                                        </div>
+                                                        <div className="text-center bg-purple-50 rounded-lg p-2">
+                                                            <p className="text-xs text-purple-600 font-medium">Protein</p>
+                                                            <p className="text-lg font-bold text-purple-900">{Math.round(meal.protein)}g</p>
+                                                        </div>
+                                                        <div className="text-center bg-yellow-50 rounded-lg p-2">
+                                                            <p className="text-xs text-yellow-600 font-medium">Carbs</p>
+                                                            <p className="text-lg font-bold text-yellow-900">{Math.round(meal.carbs)}g</p>
+                                                        </div>
+                                                        <div className="text-center bg-red-50 rounded-lg p-2">
+                                                            <p className="text-xs text-red-600 font-medium">Fat</p>
+                                                            <p className="text-lg font-bold text-red-900">{Math.round(meal.fat)}g</p>
+                                                        </div>
+                                                        <div className="text-center bg-green-50 rounded-lg p-2">
+                                                            <p className="text-xs text-green-600 font-medium">Fiber</p>
+                                                            <p className="text-lg font-bold text-green-900">{Math.round(meal.fiber)}g</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
-                                            <div className="text-center bg-purple-50 rounded-lg p-2">
-                                                <p className="text-xs text-purple-600 font-medium">Protein</p>
-                                                <p className="text-lg font-bold text-purple-900">{Math.round(meal.protein)}g</p>
-                                            </div>
-                                            <div className="text-center bg-yellow-50 rounded-lg p-2">
-                                                <p className="text-xs text-yellow-600 font-medium">Carbs</p>
-                                                <p className="text-lg font-bold text-yellow-900">{Math.round(meal.carbs)}g</p>
-                                            </div>
-                                            <div className="text-center bg-red-50 rounded-lg p-2">
-                                                <p className="text-xs text-red-600 font-medium">Fat</p>
-                                                <p className="text-lg font-bold text-red-900">{Math.round(meal.fat)}g</p>
-                                            </div>
-                                            <div className="text-center bg-green-50 rounded-lg p-2">
-                                                <p className="text-xs text-green-600 font-medium">Fiber</p>
-                                                <p className="text-lg font-bold text-green-900">{Math.round(meal.fiber)}g</p>
-                                            </div>
-                                        </div>
+                                        ))}
                                     </div>
                                 </div>
                             ))}
-                            
-                            {meals.length === 0 && !isAnalyzing && (
+
+                            {todaysMeals.length === 0 && !isAnalyzing && (
                                 <div className="bg-white rounded-2xl shadow-lg p-12 text-center">
                                     <Camera size={48} className="mx-auto mb-4 text-gray-300" />
-                                    <p className="text-gray-500 font-medium">No meals tracked yet</p>
-                                    <p className="text-gray-400 text-sm mt-2">Scan or upload a photo to get started!</p>
+                                    <p className="text-gray-500 font-medium">No meals logged for today</p>
+                                    <p className="text-gray-400 text-sm mt-2">Pick a meal slot and scan your first meal.</p>
                                 </div>
                             )}
                         </div>
