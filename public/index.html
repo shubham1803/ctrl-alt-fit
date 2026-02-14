@@ -27,7 +27,14 @@
 
     <script type="text/babel">
         const { useState, useRef, useEffect } = React;
-        const GOOGLE_CLIENT_ID = window.GOOGLE_CLIENT_ID || 'REPLACE_WITH_YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
+        const LOCAL_GOOGLE_CLIENT_ID = (() => {
+            try {
+                return localStorage.getItem('google_client_id') || '';
+            } catch (error) {
+                return '';
+            }
+        })();
+        const GOOGLE_CLIENT_ID = window.GOOGLE_CLIENT_ID || LOCAL_GOOGLE_CLIENT_ID || 'REPLACE_WITH_YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
         const GOOGLE_CLIENT_ID_CONFIGURED = !GOOGLE_CLIENT_ID.startsWith('REPLACE_WITH_');
 
         const parseGoogleCredential = (credential) => {
@@ -112,6 +119,7 @@
             const [isAnalyzing, setIsAnalyzing] = useState(false);
             const [userProfile, setUserProfile] = useState(null);
             const [authError, setAuthError] = useState('');
+            const [clientIdInput, setClientIdInput] = useState('');
             const [selectedMealType, setSelectedMealType] = useState('breakfast');
             const [showCamera, setShowCamera] = useState(false);
             const [capturedImage, setCapturedImage] = useState(null);
@@ -212,6 +220,22 @@
                 }
                 localStorage.removeItem('userProfile');
                 setUserProfile(null);
+            };
+
+            const saveGoogleClientId = () => {
+                const trimmed = clientIdInput.trim();
+                if (!trimmed || !trimmed.endsWith('.apps.googleusercontent.com')) {
+                    setAuthError('Please enter a valid Google Web Client ID.');
+                    return;
+                }
+
+                try {
+                    localStorage.setItem('google_client_id', trimmed);
+                    window.GOOGLE_CLIENT_ID = trimmed;
+                    window.location.reload();
+                } catch (error) {
+                    setAuthError('Could not save Google Client ID on this browser.');
+                }
             };
 
             // Load meals from localStorage on mount
@@ -530,9 +554,26 @@
                                         <div className="space-y-2">
                                             <div ref={googleButtonRef}></div>
                                             {!GOOGLE_CLIENT_ID_CONFIGURED && (
-                                                <p className="text-xs text-red-600">
-                                                    Set <code>window.GOOGLE_CLIENT_ID</code> in <code>public/index.html</code>.
-                                                </p>
+                                                <div className="space-y-2">
+                                                    <p className="text-xs text-red-600">
+                                                        Google Sign-In not configured. Paste your Google Web Client ID below.
+                                                    </p>
+                                                    <div className="flex gap-2">
+                                                        <input
+                                                            type="text"
+                                                            value={clientIdInput}
+                                                            onChange={(event) => setClientIdInput(event.target.value)}
+                                                            placeholder="xxxx.apps.googleusercontent.com"
+                                                            className="w-full rounded-lg border border-gray-300 px-2 py-1 text-xs"
+                                                        />
+                                                        <button
+                                                            onClick={saveGoogleClientId}
+                                                            className="rounded-lg bg-gray-800 px-3 py-1 text-xs font-medium text-white hover:bg-black"
+                                                        >
+                                                            Save
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             )}
                                             {authError && GOOGLE_CLIENT_ID_CONFIGURED && (
                                                 <p className="text-xs text-red-600">{authError}</p>
