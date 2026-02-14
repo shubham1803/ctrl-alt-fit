@@ -10,9 +10,7 @@
   "keywords": ["meal-tracker", "nutrition", "ai", "vercel"],
   "author": "",
   "license": "MIT",
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.20.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "vercel": "^33.0.0"
   }

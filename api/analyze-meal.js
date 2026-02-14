@@ -1,29 +1,5 @@
-const Anthropic = require('@anthropic-ai/sdk');
-
-const MODEL_CONFIG = {
-  'claude-sonnet-4-20250514': {
-    provider: 'anthropic',
-    model: 'claude-sonnet-4-20250514',
-    envKey: 'ANTHROPIC_API_KEY',
-  },
-  'gpt-4o-mini': {
-    provider: 'openai',
-    model: 'gpt-4o-mini',
-    envKey: 'OPENAI_API_KEY',
-  },
-  'gemini-2.0-flash': {
-    provider: 'gemini',
-    model: 'gemini-2.0-flash',
-    envKey: 'GEMINI_API_KEY',
-  },
-  'gemini-1.5-flash': {
-    provider: 'gemini',
-    model: 'gemini-2.0-flash',
-    envKey: 'GEMINI_API_KEY',
-  },
-};
-
-const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+const GEMINI_ENV_KEYS = ['GEMINI_API_KEY', 'GOOGLE_API_KEY'];
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
 const ANALYSIS_PROMPT = 'Analyze this food image. Respond with ONLY a valid JSON object, nothing else. Use this exact format:\n\n{"name":"description of meal","items":["food1","food2"],"calories":400,"protein":30,"carbs":45,"fat":18,"fiber":6}\n\nAll numbers must be integers. No text before or after the JSON.';
 
 const parseNutritionResponse = (responseText) => {
@@ -51,53 +27,13 @@ const parseNutritionResponse = (responseText) => {
   };
 };
 
-const analyzeWithAnthropic = async (apiKey, model, base64Data) => {
-  const anthropic = new Anthropic({ apiKey });
-  const message = await anthropic.messages.create({
-    model,
-    max_tokens: 1000,
-    messages: [{
-      role: 'user',
-      content: [
-        {
-          type: 'image',
-          source: { type: 'base64', media_type: 'image/jpeg', data: base64Data },
-        },
-        { type: 'text', text: ANALYSIS_PROMPT },
-      ],
-    }],
-  });
-
-  return message.content.find(item => item.type === 'text')?.text || '';
-};
-
-const analyzeWithOpenAI = async (apiKey, model, imageData) => {
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'text', text: ANALYSIS_PROMPT },
-          { type: 'image_url', image_url: { url: imageData } },
-        ],
-      }],
-    }),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`OpenAI error (${response.status}): ${errText.substring(0, 200)}`);
+const getGeminiApiKey = () => {
+  for (const keyName of GEMINI_ENV_KEYS) {
+    if (process.env[keyName]) {
+      return { keyName, keyValue: process.env[keyName] };
+    }
   }
-
-  const data = await response.json();
-  return data?.choices?.[0]?.message?.content || '';
+  return null;
 };
 
 const callGeminiGenerateContent = async (apiKey, model, base64Data) => {
@@ -137,7 +73,11 @@ const listGeminiModels = async (apiKey) => {
 
 const chooseGeminiFallbackModel = (availableModels) => {
   const preferred = [
+    'gemini-2.5-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-preview-09-2025',
     'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
     'gemini-2.0-flash-exp',
     'gemini-1.5-flash-002',
     'gemini-1.5-flash-latest',
@@ -191,33 +131,22 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { imageData, model } = req.body;
+    const { imageData } = req.body;
 
     if (!imageData) {
       return res.status(400).json({ error: 'No image data provided' });
     }
 
-    const selectedModel = MODEL_CONFIG[model] ? model : DEFAULT_MODEL;
-    const config = MODEL_CONFIG[selectedModel];
-    const apiKey = process.env[config.envKey];
-
-    if (!apiKey) {
+    const apiKeyInfo = getGeminiApiKey();
+    if (!apiKeyInfo) {
       return res.status(500).json({
         error: 'Server configuration error',
-        message: `${config.envKey} not configured`,
+        message: 'GEMINI_API_KEY (or GOOGLE_API_KEY) not configured',
       });
     }
 
     const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
-
-    let responseText;
-    if (config.provider === 'anthropic') {
-      responseText = await analyzeWithAnthropic(apiKey, config.model, base64Data);
-    } else if (config.provider === 'openai') {
-      responseText = await analyzeWithOpenAI(apiKey, config.model, imageData);
-    } else {
-      responseText = await analyzeWithGemini(apiKey, config.model, base64Data);
-    }
+    const responseText = await analyzeWithGemini(apiKeyInfo.keyValue, DEFAULT_GEMINI_MODEL, base64Data);
 
     const result = parseNutritionResponse(responseText);
     return res.status(200).json(result);
