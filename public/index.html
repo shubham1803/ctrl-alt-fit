@@ -12,6 +12,11 @@
     <link rel="manifest" href="/site.webmanifest">
     <link rel="icon" type="image/svg+xml" href="/icon.svg">
     <link rel="apple-touch-icon" href="/icon.svg">
+    <script>
+      // Set this to your OAuth 2.0 Web client ID from Google Cloud Console.
+      window.GOOGLE_CLIENT_ID = window.GOOGLE_CLIENT_ID || 'REPLACE_WITH_YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
+    </script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -22,6 +27,24 @@
 
     <script type="text/babel">
         const { useState, useRef, useEffect } = React;
+        const GOOGLE_CLIENT_ID = window.GOOGLE_CLIENT_ID || 'REPLACE_WITH_YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
+        const GOOGLE_CLIENT_ID_CONFIGURED = !GOOGLE_CLIENT_ID.startsWith('REPLACE_WITH_');
+
+        const parseGoogleCredential = (credential) => {
+            try {
+                const parts = credential.split('.');
+                if (parts.length < 2) {
+                    return null;
+                }
+                const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+                const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4);
+                const json = atob(padded);
+                return JSON.parse(json);
+            } catch (error) {
+                console.error('Failed to parse Google credential:', error);
+                return null;
+            }
+        };
 
         // Lucide icons as inline SVG components
         const Camera = ({ size = 24, className = "" }) => (
@@ -87,17 +110,109 @@
             const [meals, setMeals] = useState([]);
             const [steps, setSteps] = useState(0);
             const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [userProfile, setUserProfile] = useState(null);
+            const [authError, setAuthError] = useState('');
             const [selectedMealType, setSelectedMealType] = useState('breakfast');
             const [showCamera, setShowCamera] = useState(false);
             const [capturedImage, setCapturedImage] = useState(null);
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
             const fileInputRef = useRef(null);
+            const googleButtonRef = useRef(null);
             const streamRef = useRef(null);
             const stepListenerRef = useRef(null);
             const stepCounterActiveRef = useRef(false);
             const lastMotionYRef = useRef(null);
             const lastStepTimestampRef = useRef(0);
+
+            useEffect(() => {
+                const savedProfile = localStorage.getItem('userProfile');
+                if (savedProfile) {
+                    try {
+                        setUserProfile(JSON.parse(savedProfile));
+                    } catch (error) {
+                        console.error('Failed to parse saved user profile:', error);
+                        localStorage.removeItem('userProfile');
+                    }
+                }
+            }, []);
+
+            useEffect(() => {
+                if (userProfile) {
+                    return;
+                }
+
+                if (!GOOGLE_CLIENT_ID_CONFIGURED) {
+                    setAuthError('Google Sign-In is not configured yet.');
+                    return;
+                }
+
+                let intervalId;
+                const initGoogle = () => {
+                    if (!window.google || !window.google.accounts || !googleButtonRef.current) {
+                        return false;
+                    }
+
+                    window.google.accounts.id.initialize({
+                        client_id: GOOGLE_CLIENT_ID,
+                        callback: (response) => {
+                            const claims = parseGoogleCredential(response.credential);
+                            if (!claims) {
+                                setAuthError('Failed to read Google profile data.');
+                                return;
+                            }
+
+                            const profile = {
+                                sub: claims.sub,
+                                name: claims.name || '',
+                                given_name: claims.given_name || '',
+                                family_name: claims.family_name || '',
+                                email: claims.email || '',
+                                picture: claims.picture || '',
+                            };
+
+                            setUserProfile(profile);
+                            localStorage.setItem('userProfile', JSON.stringify(profile));
+                            setAuthError('');
+                        },
+                    });
+
+                    googleButtonRef.current.innerHTML = '';
+                    window.google.accounts.id.renderButton(googleButtonRef.current, {
+                        type: 'standard',
+                        theme: 'outline',
+                        size: 'large',
+                        shape: 'pill',
+                        text: 'signin_with',
+                        logo_alignment: 'left',
+                        width: 260,
+                    });
+
+                    return true;
+                };
+
+                if (!initGoogle()) {
+                    intervalId = window.setInterval(() => {
+                        if (initGoogle()) {
+                            window.clearInterval(intervalId);
+                        }
+                    }, 250);
+                }
+
+                return () => {
+                    if (intervalId) {
+                        window.clearInterval(intervalId);
+                    }
+                };
+            }, [userProfile]);
+
+            const signOut = () => {
+                if (window.google && window.google.accounts && window.google.accounts.id) {
+                    window.google.accounts.id.disableAutoSelect();
+                }
+                localStorage.removeItem('userProfile');
+                setUserProfile(null);
+            };
 
             // Load meals from localStorage on mount
             useEffect(() => {
@@ -212,6 +327,10 @@
             }, []);
 
             const startCamera = async () => {
+                if (!userProfile) {
+                    alert('Please sign in with Google to log meals.');
+                    return;
+                }
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({ 
                         video: { 
@@ -263,6 +382,10 @@
             };
 
             const handleFileUpload = (event) => {
+                if (!userProfile) {
+                    alert('Please sign in with Google to log meals.');
+                    return;
+                }
                 const file = event.target.files[0];
                 if (file) {
                     const reader = new FileReader();
@@ -275,6 +398,10 @@
             };
 
             const analyzeMeal = async (imageData) => {
+                if (!userProfile) {
+                    alert('Please sign in with Google to log meals.');
+                    return;
+                }
                 setIsAnalyzing(true);
                 
                 try {
@@ -299,6 +426,7 @@
                         createdAt: now.toISOString(),
                         timestamp: now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
                         mealType: selectedMealType,
+                        ownerSub: userProfile?.sub || 'unknown-user',
                         image: imageData,
                         ...nutritionData
                     };
@@ -340,7 +468,13 @@
             );
 
             const now = new Date();
-            const todaysMeals = meals.filter((meal) => isSameDay(getMealDate(meal), now));
+            const todaysMeals = meals.filter((meal) => {
+                if (!userProfile) {
+                    return false;
+                }
+                const ownerMatches = meal.ownerSub ? meal.ownerSub === userProfile.sub : true;
+                return ownerMatches && isSameDay(getMealDate(meal), now);
+            });
             const todaysMealsSorted = [...todaysMeals].sort((a, b) => getMealDate(b) - getMealDate(a));
             const selectedMealTypeMeta = mealTypeMap[selectedMealType] || mealTypeMap.other;
             const todaysCountByType = mealTypes.reduce((acc, type) => {
@@ -367,9 +501,45 @@
                     <div className="max-w-4xl mx-auto p-4">
                         {/* Header */}
                         <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-                            <div className="flex items-center gap-3 mb-4">
-                                <CtrlAltFitLogo className="h-11 w-11 shrink-0" />
-                                <h1 className="text-3xl font-bold text-gray-800">CTRL-ALT-FIT</h1>
+                            <div className="flex flex-col gap-4 mb-4 md:flex-row md:items-start md:justify-between">
+                                <div className="flex items-center gap-3">
+                                    <CtrlAltFitLogo className="h-11 w-11 shrink-0" />
+                                    <h1 className="text-3xl font-bold text-gray-800">CTRL-ALT-FIT</h1>
+                                </div>
+
+                                <div className="md:text-right">
+                                    {userProfile ? (
+                                        <div className="inline-flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+                                            {userProfile.picture ? (
+                                                <img src={userProfile.picture} alt={userProfile.name || 'User'} className="h-10 w-10 rounded-full object-cover" />
+                                            ) : (
+                                                <div className="h-10 w-10 rounded-full bg-gray-300"></div>
+                                            )}
+                                            <div className="text-left">
+                                                <p className="text-sm font-semibold text-gray-800">{userProfile.name || 'Signed in user'}</p>
+                                                <p className="text-xs text-gray-600">{userProfile.email || ''}</p>
+                                                <button
+                                                    onClick={signOut}
+                                                    className="mt-1 text-xs font-medium text-red-600 hover:text-red-700"
+                                                >
+                                                    Sign out
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <div ref={googleButtonRef}></div>
+                                            {!GOOGLE_CLIENT_ID_CONFIGURED && (
+                                                <p className="text-xs text-red-600">
+                                                    Set <code>window.GOOGLE_CLIENT_ID</code> in <code>public/index.html</code>.
+                                                </p>
+                                            )}
+                                            {authError && GOOGLE_CLIENT_ID_CONFIGURED && (
+                                                <p className="text-xs text-red-600">{authError}</p>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                             
                             {/* Daily Summary Cards */}
@@ -447,15 +617,31 @@
                             <div className="grid grid-cols-2 gap-3">
                                 <button
                                     onClick={startCamera}
-                                    className="bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl py-3 px-4 font-semibold flex items-center justify-center gap-2 hover:from-green-600 hover:to-green-700 transition-all shadow-md"
+                                    className={`rounded-xl py-3 px-4 font-semibold flex items-center justify-center gap-2 transition-all shadow-md ${
+                                        userProfile
+                                            ? 'bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-600 hover:to-green-700'
+                                            : 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                                    }`}
+                                    disabled={!userProfile}
                                 >
                                     <Camera size={20} />
                                     Scan {selectedMealTypeMeta.label}
                                 </button>
                                 
                                 <button
-                                    onClick={() => fileInputRef.current.click()}
-                                    className="bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl py-3 px-4 font-semibold flex items-center justify-center gap-2 hover:from-blue-600 hover:to-blue-700 transition-all shadow-md"
+                                    onClick={() => {
+                                        if (!userProfile) {
+                                            alert('Please sign in with Google to log meals.');
+                                            return;
+                                        }
+                                        fileInputRef.current.click();
+                                    }}
+                                    className={`rounded-xl py-3 px-4 font-semibold flex items-center justify-center gap-2 transition-all shadow-md ${
+                                        userProfile
+                                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700'
+                                            : 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                                    }`}
+                                    disabled={!userProfile}
                                 >
                                     <Plus size={20} />
                                     Upload {selectedMealTypeMeta.label}
