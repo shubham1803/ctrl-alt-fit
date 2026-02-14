@@ -12,10 +12,6 @@
     <link rel="manifest" href="/site.webmanifest">
     <link rel="icon" type="image/svg+xml" href="/icon.svg">
     <link rel="apple-touch-icon" href="/icon.svg">
-    <script>
-      // Set this to your OAuth 2.0 Web client ID from Google Cloud Console.
-      window.GOOGLE_CLIENT_ID = window.GOOGLE_CLIENT_ID || 'REPLACE_WITH_YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
-    </script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -27,15 +23,6 @@
 
     <script type="text/babel">
         const { useState, useRef, useEffect } = React;
-        const LOCAL_GOOGLE_CLIENT_ID = (() => {
-            try {
-                return localStorage.getItem('google_client_id') || '';
-            } catch (error) {
-                return '';
-            }
-        })();
-        const GOOGLE_CLIENT_ID = window.GOOGLE_CLIENT_ID || LOCAL_GOOGLE_CLIENT_ID || 'REPLACE_WITH_YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
-        const GOOGLE_CLIENT_ID_CONFIGURED = !GOOGLE_CLIENT_ID.startsWith('REPLACE_WITH_');
 
         const parseGoogleCredential = (credential) => {
             try {
@@ -119,7 +106,8 @@
             const [isAnalyzing, setIsAnalyzing] = useState(false);
             const [userProfile, setUserProfile] = useState(null);
             const [authError, setAuthError] = useState('');
-            const [clientIdInput, setClientIdInput] = useState('');
+            const [authConfigLoading, setAuthConfigLoading] = useState(true);
+            const [googleClientId, setGoogleClientId] = useState(window.GOOGLE_CLIENT_ID || '');
             const [selectedMealType, setSelectedMealType] = useState('breakfast');
             const [showCamera, setShowCamera] = useState(false);
             const [capturedImage, setCapturedImage] = useState(null);
@@ -132,6 +120,7 @@
             const stepCounterActiveRef = useRef(false);
             const lastMotionYRef = useRef(null);
             const lastStepTimestampRef = useRef(0);
+            const googleClientIdConfigured = Boolean(googleClientId && googleClientId.trim());
 
             useEffect(() => {
                 const savedProfile = localStorage.getItem('userProfile');
@@ -146,11 +135,42 @@
             }, []);
 
             useEffect(() => {
+                const loadConfig = async () => {
+                    try {
+                        const response = await fetch('/api/config');
+                        if (!response.ok) {
+                            throw new Error(`Config API failed: ${response.status}`);
+                        }
+
+                        const data = await response.json();
+                        const envClientId = String(data?.googleClientId || '').trim();
+                        if (envClientId) {
+                            setGoogleClientId(envClientId);
+                            window.GOOGLE_CLIENT_ID = envClientId;
+                        } else {
+                            setAuthError('Google Sign-In is not configured on server.');
+                        }
+                    } catch (error) {
+                        console.error('Failed to load auth config:', error);
+                        setAuthError('Could not load sign-in configuration.');
+                    } finally {
+                        setAuthConfigLoading(false);
+                    }
+                };
+
+                loadConfig();
+            }, []);
+
+            useEffect(() => {
                 if (userProfile) {
                     return;
                 }
 
-                if (!GOOGLE_CLIENT_ID_CONFIGURED) {
+                if (authConfigLoading) {
+                    return;
+                }
+
+                if (!googleClientIdConfigured) {
                     setAuthError('Google Sign-In is not configured yet.');
                     return;
                 }
@@ -162,7 +182,7 @@
                     }
 
                     window.google.accounts.id.initialize({
-                        client_id: GOOGLE_CLIENT_ID,
+                        client_id: googleClientId,
                         callback: (response) => {
                             const claims = parseGoogleCredential(response.credential);
                             if (!claims) {
@@ -195,6 +215,7 @@
                         logo_alignment: 'left',
                         width: 260,
                     });
+                    window.google.accounts.id.prompt();
 
                     return true;
                 };
@@ -212,7 +233,7 @@
                         window.clearInterval(intervalId);
                     }
                 };
-            }, [userProfile]);
+            }, [userProfile, authConfigLoading, googleClientId, googleClientIdConfigured]);
 
             const signOut = () => {
                 if (window.google && window.google.accounts && window.google.accounts.id) {
@@ -220,22 +241,6 @@
                 }
                 localStorage.removeItem('userProfile');
                 setUserProfile(null);
-            };
-
-            const saveGoogleClientId = () => {
-                const trimmed = clientIdInput.trim();
-                if (!trimmed || !trimmed.endsWith('.apps.googleusercontent.com')) {
-                    setAuthError('Please enter a valid Google Web Client ID.');
-                    return;
-                }
-
-                try {
-                    localStorage.setItem('google_client_id', trimmed);
-                    window.GOOGLE_CLIENT_ID = trimmed;
-                    window.location.reload();
-                } catch (error) {
-                    setAuthError('Could not save Google Client ID on this browser.');
-                }
             };
 
             // Load meals from localStorage on mount
@@ -469,6 +474,35 @@
                 setMeals(prev => prev.filter(meal => meal.id !== id));
             };
 
+            if (!userProfile) {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50">
+                        <div className="max-w-md mx-auto p-4 pt-16">
+                            <div className="bg-white rounded-2xl shadow-lg p-8 text-center">
+                                <CtrlAltFitLogo className="h-14 w-14 mx-auto mb-4" />
+                                <h1 className="text-2xl font-bold text-gray-800 mb-2">CTRL-ALT-FIT</h1>
+                                <p className="text-sm text-gray-600 mb-6">Sign in with Google to continue.</p>
+                                {authConfigLoading ? (
+                                    <p className="text-sm text-gray-500">Loading sign-in...</p>
+                                ) : (
+                                    <div className="flex justify-center mb-3">
+                                        <div ref={googleButtonRef}></div>
+                                    </div>
+                                )}
+                                {!googleClientIdConfigured && !authConfigLoading && (
+                                    <p className="text-xs text-red-600">
+                                        Set <code>GOOGLE_CLIENT_ID</code> in Vercel environment variables and redeploy.
+                                    </p>
+                                )}
+                                {authError && (
+                                    <p className="text-xs text-red-600">{authError}</p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
             const getMealDate = (meal) => {
                 const candidates = [meal?.createdAt, meal?.timestamp];
                 if (typeof meal?.id === 'number') {
@@ -532,54 +566,23 @@
                                 </div>
 
                                 <div className="md:text-right">
-                                    {userProfile ? (
-                                        <div className="inline-flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
-                                            {userProfile.picture ? (
-                                                <img src={userProfile.picture} alt={userProfile.name || 'User'} className="h-10 w-10 rounded-full object-cover" />
-                                            ) : (
-                                                <div className="h-10 w-10 rounded-full bg-gray-300"></div>
-                                            )}
-                                            <div className="text-left">
-                                                <p className="text-sm font-semibold text-gray-800">{userProfile.name || 'Signed in user'}</p>
-                                                <p className="text-xs text-gray-600">{userProfile.email || ''}</p>
-                                                <button
-                                                    onClick={signOut}
-                                                    className="mt-1 text-xs font-medium text-red-600 hover:text-red-700"
-                                                >
-                                                    Sign out
-                                                </button>
-                                            </div>
+                                    <div className="inline-flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+                                        {userProfile.picture ? (
+                                            <img src={userProfile.picture} alt={userProfile.name || 'User'} className="h-10 w-10 rounded-full object-cover" />
+                                        ) : (
+                                            <div className="h-10 w-10 rounded-full bg-gray-300"></div>
+                                        )}
+                                        <div className="text-left">
+                                            <p className="text-sm font-semibold text-gray-800">{userProfile.name || 'Signed in user'}</p>
+                                            <p className="text-xs text-gray-600">{userProfile.email || ''}</p>
+                                            <button
+                                                onClick={signOut}
+                                                className="mt-1 text-xs font-medium text-red-600 hover:text-red-700"
+                                            >
+                                                Sign out
+                                            </button>
                                         </div>
-                                    ) : (
-                                        <div className="space-y-2">
-                                            <div ref={googleButtonRef}></div>
-                                            {!GOOGLE_CLIENT_ID_CONFIGURED && (
-                                                <div className="space-y-2">
-                                                    <p className="text-xs text-red-600">
-                                                        Google Sign-In not configured. Paste your Google Web Client ID below.
-                                                    </p>
-                                                    <div className="flex gap-2">
-                                                        <input
-                                                            type="text"
-                                                            value={clientIdInput}
-                                                            onChange={(event) => setClientIdInput(event.target.value)}
-                                                            placeholder="xxxx.apps.googleusercontent.com"
-                                                            className="w-full rounded-lg border border-gray-300 px-2 py-1 text-xs"
-                                                        />
-                                                        <button
-                                                            onClick={saveGoogleClientId}
-                                                            className="rounded-lg bg-gray-800 px-3 py-1 text-xs font-medium text-white hover:bg-black"
-                                                        >
-                                                            Save
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            )}
-                                            {authError && GOOGLE_CLIENT_ID_CONFIGURED && (
-                                                <p className="text-xs text-red-600">{authError}</p>
-                                            )}
-                                        </div>
-                                    )}
+                                    </div>
                                 </div>
                             </div>
                             
