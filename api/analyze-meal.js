@@ -1,6 +1,6 @@
 const GEMINI_ENV_KEYS = ['GEMINI_API_KEY', 'GOOGLE_API_KEY'];
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
-const ANALYSIS_PROMPT = 'Analyze this food image. Respond with ONLY a valid JSON object, nothing else. Use this exact format:\n\n{"name":"description of meal","items":["food1","food2"],"calories":400,"protein":30,"carbs":45,"fat":18,"fiber":6}\n\nAll numbers must be integers. No text before or after the JSON.';
+const ANALYSIS_PROMPT = 'Analyze this food image. Respond with ONLY a valid JSON object, nothing else. Use this exact format:\n\n{"name":"description of meal","items":["food1","food2"],"itemDetails":[{"name":"food1","quantity_g":120},{"name":"food2","quantity_g":80}],"calories":400,"protein":30,"carbs":45,"fat":18,"fiber":6}\n\nRules:\n- quantity_g must be estimated portion size in grams for each food item.\n- All numbers must be integers.\n- itemDetails must include every item listed in items.\n- No text before or after the JSON.';
 
 const parseNutritionResponse = (responseText) => {
   let cleaned = (responseText || '').trim();
@@ -15,10 +15,27 @@ const parseNutritionResponse = (responseText) => {
 
   const jsonStr = cleaned.substring(firstBrace, lastBrace + 1);
   const nutritionData = JSON.parse(jsonStr);
+  const parsedItemDetails = Array.isArray(nutritionData.itemDetails)
+    ? nutritionData.itemDetails
+    : Array.isArray(nutritionData.item_details)
+      ? nutritionData.item_details
+      : [];
+
+  const itemDetails = parsedItemDetails
+    .map((item) => ({
+      name: String(item?.name || '').trim(),
+      quantity_g: Math.max(0, Math.round(Number(item?.quantity_g) || 0)),
+    }))
+    .filter((item) => item.name);
+
+  const items = Array.isArray(nutritionData.items)
+    ? nutritionData.items.map((item) => String(item).trim()).filter(Boolean)
+    : itemDetails.map((item) => item.name);
 
   return {
     name: nutritionData.name || 'Unknown meal',
-    items: Array.isArray(nutritionData.items) ? nutritionData.items : [],
+    items,
+    itemDetails,
     calories: Number(nutritionData.calories) || 0,
     protein: Number(nutritionData.protein) || 0,
     carbs: Number(nutritionData.carbs) || 0,

@@ -14,6 +14,7 @@ const ANALYSIS_PROMPT = `Analyze this meal image and provide nutritional estimat
 {
   "name": "brief meal description",
   "items": ["item1", "item2"],
+  "itemDetails": [{"name":"item1","quantity_g":120},{"name":"item2","quantity_g":80}],
   "calories": number,
   "protein": number,
   "carbs": number,
@@ -21,7 +22,11 @@ const ANALYSIS_PROMPT = `Analyze this meal image and provide nutritional estimat
   "fiber": number
 }
 
-All macro values should be in grams except calories. Be as accurate as possible based on portion sizes visible.`;
+Rules:
+- quantity_g must be estimated portion size in grams for each item.
+- All numbers should be integers.
+- itemDetails should cover every item in items.
+- All macro values should be in grams except calories.`;
 
 const callGeminiGenerateContent = async (apiKey, model, base64Data) => {
   return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
@@ -94,6 +99,24 @@ app.post('/api/analyze-meal', async (req, res) => {
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const nutritionData = JSON.parse(jsonMatch[0]);
+      const parsedItemDetails = Array.isArray(nutritionData.itemDetails)
+        ? nutritionData.itemDetails
+        : Array.isArray(nutritionData.item_details)
+          ? nutritionData.item_details
+          : [];
+      const itemDetails = parsedItemDetails
+        .map((item) => ({
+          name: String(item?.name || '').trim(),
+          quantity_g: Math.max(0, Math.round(Number(item?.quantity_g) || 0)),
+        }))
+        .filter((item) => item.name);
+
+      const items = Array.isArray(nutritionData.items)
+        ? nutritionData.items.map((item) => String(item).trim()).filter(Boolean)
+        : itemDetails.map((item) => item.name);
+
+      nutritionData.items = items;
+      nutritionData.itemDetails = itemDetails;
       res.json(nutritionData);
     } else {
       throw new Error('Could not parse nutrition data from AI response');

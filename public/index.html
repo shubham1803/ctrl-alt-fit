@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CTRL-ALT-FIT - AI Nutrition Analysis</title>
     <meta name="description" content="CTRL-ALT-FIT: AI-powered meal tracking and nutrition analysis">
+    <meta name="theme-color" content="#10b981">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="CTRL-ALT-FIT">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="icon" type="image/svg+xml" href="/icon.svg">
+    <link rel="apple-touch-icon" href="/icon.svg">
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -576,9 +583,22 @@
                                                     <p className="text-sm text-gray-500 mb-3">{meal.timestamp || getMealDate(meal).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
                                                     
                                                     {meal.items && meal.items.length > 0 && (
-                                                        <p className="text-sm text-gray-600 mb-3">
-                                                            <span className="font-medium">Items:</span> {meal.items.join(', ')}
-                                                        </p>
+                                                        <div className="mb-3">
+                                                            <p className="text-sm font-medium text-gray-700 mb-1">Items & quantity</p>
+                                                            {Array.isArray(meal.itemDetails) && meal.itemDetails.length > 0 ? (
+                                                                <div className="flex flex-wrap gap-2">
+                                                                    {meal.itemDetails.map((item, index) => (
+                                                                        <span key={`${item.name}-${index}`} className="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-700">
+                                                                            {item.name}: {Math.round(Number(item.quantity_g) || 0)}g
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            ) : (
+                                                                <p className="text-sm text-gray-600">
+                                                                    {meal.items.join(', ')}
+                                                                </p>
+                                                            )}
+                                                        </div>
                                                     )}
                                                     
                                                     <div className="grid grid-cols-5 gap-2">
