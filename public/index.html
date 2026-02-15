@@ -126,6 +126,8 @@
             const [inviteEmail, setInviteEmail] = useState('');
             const [groupPostType, setGroupPostType] = useState('announcement');
             const [groupPostText, setGroupPostText] = useState('');
+            const [groupPostMedia, setGroupPostMedia] = useState(null);
+            const [groupPostMediaType, setGroupPostMediaType] = useState('');
             const [selectedMealType, setSelectedMealType] = useState('breakfast');
             const [showCamera, setShowCamera] = useState(false);
             const [capturedImage, setCapturedImage] = useState(null);
@@ -135,6 +137,7 @@
             const googleButtonRef = useRef(null);
             const profileMenuRef = useRef(null);
             const profilePhotoInputRef = useRef(null);
+            const groupMediaInputRef = useRef(null);
             const joinInviteHandledRef = useRef(false);
             const streamRef = useRef(null);
             const stepListenerRef = useRef(null);
@@ -303,6 +306,13 @@
             const getInviteUrl = (group) => (
                 group ? `${window.location.origin}${window.location.pathname}?join=${group.inviteCode}` : ''
             );
+            const normalizeGroup = (group) => ({
+                ...group,
+                ownerSub: group?.ownerSub || (Array.isArray(group?.members) && group.members[0] ? group.members[0].sub : ''),
+                members: Array.isArray(group?.members) ? group.members : [],
+                posts: Array.isArray(group?.posts) ? group.posts : [],
+                joinRequests: Array.isArray(group?.joinRequests) ? group.joinRequests : [],
+            });
 
             useEffect(() => {
                 if (!userProfile) {
@@ -314,7 +324,7 @@
                 try {
                     const raw = localStorage.getItem(GROUPS_STORAGE_KEY);
                     const parsed = raw ? JSON.parse(raw) : [];
-                    setGroups(Array.isArray(parsed) ? parsed : []);
+                    setGroups(Array.isArray(parsed) ? parsed.map(normalizeGroup) : []);
                 } catch (error) {
                     console.error('Failed to load groups:', error);
                     setGroups([]);
@@ -340,14 +350,24 @@
                 }
 
                 const alreadyMember = (group.members || []).some((member) => member.sub === userProfile.sub);
-                if (!alreadyMember) {
-                    const updated = groups.map((g) => {
-                        if (g.id !== group.id) {
-                            return g;
-                        }
-                        return { ...g, members: [...(g.members || []), buildMemberFromProfile(userProfile, steps)] };
-                    });
+                const alreadyRequested = (group.joinRequests || []).some((request) => request.sub === userProfile.sub);
+                if (!alreadyMember && !alreadyRequested) {
+                    const joinRequest = {
+                        sub: userProfile.sub,
+                        name: userProfile.name || 'Member',
+                        email: userProfile.email || '',
+                        picture: userProfile.picture || '',
+                        requestedAt: new Date().toISOString(),
+                    };
+                    const updated = groups.map((g) => (
+                        g.id === group.id
+                            ? { ...g, joinRequests: [joinRequest, ...(g.joinRequests || [])] }
+                            : g
+                    ));
                     persistGroups(updated);
+                    alert(`Join request sent to ${group.name} admin.`);
+                } else if (alreadyRequested) {
+                    alert(`Your join request for ${group.name} is pending admin approval.`);
                 }
 
                 setActiveTab('groups');
@@ -369,6 +389,7 @@
                     createdAt: new Date().toISOString(),
                     members: [buildMemberFromProfile(userProfile, steps)],
                     posts: [],
+                    joinRequests: [],
                 };
 
                 const nextGroups = [newGroup, ...groups];
@@ -388,6 +409,10 @@
                 const trimmedEmail = inviteEmail.trim();
                 const inviteUrl = getInviteUrl(selectedGroup);
                 if (!trimmedEmail || !selectedGroup || !inviteUrl) {
+                    return;
+                }
+                if (selectedGroup.ownerSub !== userProfile?.sub) {
+                    alert('Only group admin can add members directly.');
                     return;
                 }
 
@@ -417,7 +442,7 @@
 
             const postToGroupChat = () => {
                 const text = groupPostText.trim();
-                if (!selectedGroup || !text || !userProfile) {
+                if (!selectedGroup || !userProfile || (!text && !groupPostMedia)) {
                     return;
                 }
 
@@ -425,6 +450,8 @@
                     id: `post_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
                     type: groupPostType,
                     text,
+                    media: groupPostMedia,
+                    mediaType: groupPostMediaType,
                     createdAt: new Date().toISOString(),
                     author: {
                         sub: userProfile.sub,
@@ -446,6 +473,125 @@
                 persistGroups(updated);
                 setGroupPostText('');
                 setGroupPostType('announcement');
+                setGroupPostMedia(null);
+                setGroupPostMediaType('');
+                if (groupMediaInputRef.current) {
+                    groupMediaInputRef.current.value = '';
+                }
+            };
+
+            const handleGroupMediaFile = (event) => {
+                const file = event.target.files && event.target.files[0];
+                if (!file) {
+                    return;
+                }
+
+                if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+                    alert('Please select an image or video file.');
+                    return;
+                }
+
+                const maxBytes = 8 * 1024 * 1024;
+                if (file.size > maxBytes) {
+                    alert('Media is too large. Please use a file smaller than 8MB.');
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    setGroupPostMedia(e.target.result);
+                    setGroupPostMediaType(file.type.startsWith('video/') ? 'video' : 'image');
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const clearGroupPostMedia = () => {
+                setGroupPostMedia(null);
+                setGroupPostMediaType('');
+                if (groupMediaInputRef.current) {
+                    groupMediaInputRef.current.value = '';
+                }
+            };
+
+            const shareGroupInvite = async () => {
+                if (!selectedGroup) {
+                    return;
+                }
+                const inviteUrl = getInviteUrl(selectedGroup);
+                if (!inviteUrl) {
+                    return;
+                }
+
+                const shareText = `Join "${selectedGroup.name}" on CTRL-ALT-FIT. Admin approval is required to enter.`;
+                try {
+                    if (navigator.share) {
+                        await navigator.share({
+                            title: `Join ${selectedGroup.name}`,
+                            text: shareText,
+                            url: inviteUrl,
+                        });
+                        return;
+                    }
+
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(inviteUrl);
+                        alert('Invite link copied. Share it with your friend.');
+                        return;
+                    }
+                    alert(inviteUrl);
+                } catch (error) {
+                    console.error('Failed to share invite:', error);
+                }
+            };
+
+            const approveJoinRequest = (requestSub) => {
+                if (!selectedGroup || selectedGroup.ownerSub !== userProfile?.sub) {
+                    return;
+                }
+
+                const request = (selectedGroup.joinRequests || []).find((entry) => entry.sub === requestSub);
+                if (!request) {
+                    return;
+                }
+
+                const updated = groups.map((group) => {
+                    if (group.id !== selectedGroup.id) {
+                        return group;
+                    }
+
+                    const hasMember = (group.members || []).some((member) => member.sub === requestSub);
+                    const nextMembers = hasMember
+                        ? (group.members || [])
+                        : [...(group.members || []), {
+                            sub: request.sub,
+                            name: request.name || 'Member',
+                            email: request.email || '',
+                            picture: request.picture || '',
+                            steps: 0,
+                        }];
+
+                    return {
+                        ...group,
+                        members: nextMembers,
+                        joinRequests: (group.joinRequests || []).filter((entry) => entry.sub !== requestSub),
+                    };
+                });
+
+                persistGroups(updated);
+            };
+
+            const rejectJoinRequest = (requestSub) => {
+                if (!selectedGroup || selectedGroup.ownerSub !== userProfile?.sub) {
+                    return;
+                }
+
+                const updated = groups.map((group) => (
+                    group.id === selectedGroup.id
+                        ? { ...group, joinRequests: (group.joinRequests || []).filter((entry) => entry.sub !== requestSub) }
+                        : group
+                ));
+
+                persistGroups(updated);
             };
 
             useEffect(() => {
@@ -738,6 +884,7 @@
             useEffect(() => {
                 setGroupPostType('announcement');
                 setGroupPostText('');
+                clearGroupPostMedia();
             }, [selectedGroupId]);
 
             if (!userProfile) {
@@ -823,7 +970,16 @@
             const caloriesBurnedEstimate = Math.round(steps * 0.04);
             const firstName = (userProfile?.given_name || userProfile?.name || 'User').split(' ')[0];
             const myGroups = groups.filter((group) => (group.members || []).some((member) => member.sub === userProfile?.sub));
+            const myPendingGroups = groups.filter((group) => {
+                const isMember = (group.members || []).some((member) => member.sub === userProfile?.sub);
+                if (isMember) {
+                    return false;
+                }
+                return (group.joinRequests || []).some((request) => request.sub === userProfile?.sub);
+            });
             const selectedGroup = myGroups.find((group) => group.id === selectedGroupId) || null;
+            const isGroupAdmin = Boolean(selectedGroup && selectedGroup.ownerSub === userProfile?.sub);
+            const pendingJoinRequests = selectedGroup ? (selectedGroup.joinRequests || []) : [];
             const groupLeaderboard = selectedGroup
                 ? [...(selectedGroup.members || [])].sort((left, right) => (Number(right.steps) || 0) - (Number(left.steps) || 0))
                 : [];
@@ -1285,16 +1441,69 @@
                                             >
                                                 ← Back
                                             </button>
-                                            <button
-                                                onClick={openAddMembers}
-                                                className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
-                                            >
-                                                Add Members
-                                            </button>
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    onClick={shareGroupInvite}
+                                                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                                                >
+                                                    Share Invite
+                                                </button>
+                                                {isGroupAdmin && (
+                                                    <button
+                                                        onClick={openAddMembers}
+                                                        className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                                                    >
+                                                        Add Members
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
                                         <h2 className="text-xl font-bold text-gray-800 mt-3">{selectedGroup.name}</h2>
-                                        <p className="text-sm text-gray-500">Leaderboard by steps</p>
+                                        <p className="text-sm text-gray-500">
+                                            Leaderboard by steps {isGroupAdmin ? '• You are admin' : '• Invitees need admin approval'}
+                                        </p>
                                     </div>
+
+                                    {isGroupAdmin && (
+                                        <div className="bg-white rounded-2xl shadow-lg p-5">
+                                            <h3 className="text-lg font-bold text-gray-800 mb-2">Join Requests</h3>
+                                            {pendingJoinRequests.length === 0 ? (
+                                                <p className="text-sm text-gray-500">No pending requests.</p>
+                                            ) : (
+                                                <div className="space-y-2">
+                                                    {pendingJoinRequests.map((request) => (
+                                                        <div key={request.sub} className="flex items-center justify-between rounded-xl border border-gray-100 px-3 py-2">
+                                                            <div className="flex items-center gap-2">
+                                                                {request.picture ? (
+                                                                    <img src={request.picture} alt={request.name || 'Request user'} className="h-8 w-8 rounded-full object-cover" />
+                                                                ) : (
+                                                                    <div className="h-8 w-8 rounded-full bg-gray-200"></div>
+                                                                )}
+                                                                <div>
+                                                                    <p className="text-sm font-semibold text-gray-800">{request.name || 'Member'}</p>
+                                                                    <p className="text-xs text-gray-500">{request.email || 'No email'}</p>
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <button
+                                                                    onClick={() => rejectJoinRequest(request.sub)}
+                                                                    className="rounded-lg border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                                                                >
+                                                                    Reject
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => approveJoinRequest(request.sub)}
+                                                                    className="rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700"
+                                                                >
+                                                                    Approve
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
 
                                     <div className="bg-white rounded-2xl shadow-lg p-5 space-y-2">
                                         {groupLeaderboard.map((member, index) => (
@@ -1350,15 +1559,47 @@
                                                 className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
                                                 rows={3}
                                             />
-                                            <div className="flex justify-end">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={() => groupMediaInputRef.current && groupMediaInputRef.current.click()}
+                                                        className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                                                    >
+                                                        Attach Media
+                                                    </button>
+                                                    {groupPostMedia && (
+                                                        <button
+                                                            onClick={clearGroupPostMedia}
+                                                            className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                                                        >
+                                                            Remove
+                                                        </button>
+                                                    )}
+                                                    <input
+                                                        ref={groupMediaInputRef}
+                                                        type="file"
+                                                        accept="image/*,video/*"
+                                                        onChange={handleGroupMediaFile}
+                                                        className="hidden"
+                                                    />
+                                                </div>
                                                 <button
                                                     onClick={postToGroupChat}
-                                                    disabled={!groupPostText.trim()}
+                                                    disabled={!groupPostText.trim() && !groupPostMedia}
                                                     className="rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:bg-gray-300"
                                                 >
                                                     Post
                                                 </button>
                                             </div>
+                                            {groupPostMedia && (
+                                                <div className="rounded-xl border border-gray-200 p-2">
+                                                    {groupPostMediaType === 'video' ? (
+                                                        <video src={groupPostMedia} controls className="h-36 w-full rounded-lg object-cover" />
+                                                    ) : (
+                                                        <img src={groupPostMedia} alt="Post media preview" className="h-36 w-full rounded-lg object-cover" />
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
 
                                         <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
@@ -1386,6 +1627,15 @@
                                                             <p className="text-xs text-gray-500">{new Date(post.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p>
                                                         </div>
                                                         <p className="text-sm text-gray-700 whitespace-pre-wrap">{post.text}</p>
+                                                        {post.media && (
+                                                            <div className="mt-2">
+                                                                {post.mediaType === 'video' ? (
+                                                                    <video src={post.media} controls className="max-h-64 w-full rounded-lg border border-gray-200 bg-black/5" />
+                                                                ) : (
+                                                                    <img src={post.media} alt="Post attachment" className="max-h-64 w-full rounded-lg border border-gray-200 object-cover" />
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 ))
                                             )}
@@ -1395,7 +1645,11 @@
                             ) : myGroups.length === 0 ? (
                                 <div className="bg-white rounded-2xl shadow-lg p-8 text-center">
                                     <p className="text-gray-600 font-medium">No groups yet.</p>
-                                    <p className="text-sm text-gray-500 mt-1">Create a group and invite members by email.</p>
+                                    {myPendingGroups.length > 0 ? (
+                                        <p className="text-sm text-gray-500 mt-1">You have pending requests waiting for admin approval.</p>
+                                    ) : (
+                                        <p className="text-sm text-gray-500 mt-1">Create a group and invite members by email.</p>
+                                    )}
                                 </div>
                             ) : (
                                 <div className="space-y-3">
@@ -1414,6 +1668,21 @@
                                             </div>
                                         </button>
                                     ))}
+                                </div>
+                            )}
+
+                            {!selectedGroup && myPendingGroups.length > 0 && (
+                                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                                    <h3 className="text-sm font-bold text-amber-900">Pending Approvals</h3>
+                                    <p className="text-xs text-amber-700 mt-1 mb-3">You have requested to join these groups. Waiting for admin approval.</p>
+                                    <div className="space-y-2">
+                                        {myPendingGroups.map((group) => (
+                                            <div key={`pending-${group.id}`} className="rounded-xl border border-amber-200 bg-white px-3 py-2">
+                                                <p className="text-sm font-semibold text-gray-800">{group.name}</p>
+                                                <p className="text-xs text-gray-500">Status: Pending admin approval</p>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
                         </div>
