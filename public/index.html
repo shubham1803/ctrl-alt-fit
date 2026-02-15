@@ -101,6 +101,21 @@
         .dark .text-orange-900, .dark .text-blue-900, .dark .text-emerald-900 {
             color: #ffffff !important;
         }
+        .dark input,
+        .dark textarea,
+        .dark select {
+            background-color: #0b1220 !important;
+            color: #f8fafc !important;
+            border-color: #334155 !important;
+        }
+        .dark input::placeholder,
+        .dark textarea::placeholder {
+            color: #94a3b8 !important;
+        }
+        .dark select option {
+            background-color: #0b1220;
+            color: #f8fafc;
+        }
     </style>
 </head>
 <body>
@@ -200,7 +215,6 @@
             const [isSettingsOpen, setIsSettingsOpen] = useState(false);
             const [profileDraft, setProfileDraft] = useState({
                 name: '',
-                picture: '',
                 age: '',
                 sex: '',
             });
@@ -230,7 +244,6 @@
             const fileInputRef = useRef(null);
             const googleButtonRef = useRef(null);
             const profileMenuRef = useRef(null);
-            const profilePhotoInputRef = useRef(null);
             const groupMediaInputRef = useRef(null);
             const groupTextInputRef = useRef(null);
             const groupMessagesEndRef = useRef(null);
@@ -1610,7 +1623,6 @@
             const handleEditProfile = () => {
                 setProfileDraft({
                     name: userProfile?.name || '',
-                    picture: userProfile?.picture || '',
                     age: userProfile?.age ? String(userProfile.age) : '',
                     sex: userProfile?.sex || '',
                 });
@@ -1627,30 +1639,12 @@
                 setProfileDraft((prev) => ({ ...prev, [field]: value }));
             };
 
-            const handleProfilePhotoFile = (event) => {
-                const file = event.target.files && event.target.files[0];
-                if (!file) {
-                    return;
-                }
-
-                if (!file.type.startsWith('image/')) {
-                    alert('Please select an image file.');
-                    return;
-                }
-
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    handleProfileDraftChange('picture', e.target.result);
-                };
-                reader.readAsDataURL(file);
-            };
-
             const handleSaveProfile = () => {
                 const ageValue = profileDraft.age === '' ? '' : Math.max(0, Math.round(Number(profileDraft.age) || 0));
                 const nextProfile = {
                     ...userProfile,
                     name: profileDraft.name.trim() || userProfile?.name || '',
-                    picture: profileDraft.picture || userProfile?.picture || '',
+                    picture: userProfile?.picture || '',
                     age: ageValue,
                     sex: profileDraft.sex || '',
                 };
@@ -2604,35 +2598,6 @@
                                                 onChange={(event) => handleProfileDraftChange('name', event.target.value)}
                                                 className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
                                                 placeholder="Your full name"
-                                            />
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Profile Picture URL</label>
-                                            <input
-                                                type="url"
-                                                value={profileDraft.picture}
-                                                onChange={(event) => handleProfileDraftChange('picture', event.target.value)}
-                                                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
-                                                placeholder="https://..."
-                                            />
-                                            <div className="mt-2 flex items-center gap-2">
-                                                <button
-                                                    onClick={() => profilePhotoInputRef.current && profilePhotoInputRef.current.click()}
-                                                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                                                >
-                                                    Upload Photo
-                                                </button>
-                                                {profileDraft.picture && (
-                                                    <img src={profileDraft.picture} alt="Profile preview" className="h-8 w-8 rounded-full object-cover ring-1 ring-gray-300" />
-                                                )}
-                                            </div>
-                                            <input
-                                                ref={profilePhotoInputRef}
-                                                type="file"
-                                                accept="image/*"
-                                                onChange={handleProfilePhotoFile}
-                                                className="hidden"
                                             />
                                         </div>
 
