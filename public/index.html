@@ -128,6 +128,10 @@
             const [groupPostText, setGroupPostText] = useState('');
             const [groupPostMedia, setGroupPostMedia] = useState(null);
             const [groupPostMediaType, setGroupPostMediaType] = useState('');
+            const [isStickerPickerOpen, setIsStickerPickerOpen] = useState(false);
+            const [isGroupCaptureOpen, setIsGroupCaptureOpen] = useState(false);
+            const [groupCaptureMode, setGroupCaptureMode] = useState('photo');
+            const [isRecordingGroupVideo, setIsRecordingGroupVideo] = useState(false);
             const [selectedMealType, setSelectedMealType] = useState('breakfast');
             const [showCamera, setShowCamera] = useState(false);
             const [capturedImage, setCapturedImage] = useState(null);
@@ -138,6 +142,11 @@
             const profileMenuRef = useRef(null);
             const profilePhotoInputRef = useRef(null);
             const groupMediaInputRef = useRef(null);
+            const groupCaptureVideoRef = useRef(null);
+            const groupCaptureCanvasRef = useRef(null);
+            const groupCaptureStreamRef = useRef(null);
+            const groupMediaRecorderRef = useRef(null);
+            const groupMediaChunksRef = useRef([]);
             const joinInviteHandledRef = useRef(false);
             const streamRef = useRef(null);
             const stepListenerRef = useRef(null);
@@ -303,6 +312,7 @@
             });
 
             const generateInviteCode = () => Math.random().toString(36).slice(2, 10).toUpperCase();
+            const stickerOptions = ['🔥', '💪', '🏆', '😎', '🎯', '✅', '🥗', '🏃', '🥳', '👏'];
             const getInviteUrl = (group) => (
                 group ? `${window.location.origin}${window.location.pathname}?join=${group.inviteCode}` : ''
             );
@@ -475,9 +485,42 @@
                 setGroupPostType('announcement');
                 setGroupPostMedia(null);
                 setGroupPostMediaType('');
+                setIsStickerPickerOpen(false);
                 if (groupMediaInputRef.current) {
                     groupMediaInputRef.current.value = '';
                 }
+            };
+
+            const sendSticker = (sticker) => {
+                if (!selectedGroup || !userProfile || !sticker) {
+                    return;
+                }
+
+                const newPost = {
+                    id: `post_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                    type: 'sticker',
+                    text: '',
+                    sticker,
+                    createdAt: new Date().toISOString(),
+                    author: {
+                        sub: userProfile.sub,
+                        name: userProfile.name || 'Member',
+                        picture: userProfile.picture || '',
+                    },
+                };
+
+                const updated = groups.map((group) => {
+                    if (group.id !== selectedGroup.id) {
+                        return group;
+                    }
+                    return {
+                        ...group,
+                        posts: [newPost, ...(Array.isArray(group.posts) ? group.posts : [])],
+                    };
+                });
+
+                persistGroups(updated);
+                setIsStickerPickerOpen(false);
             };
 
             const handleGroupMediaFile = (event) => {
@@ -500,7 +543,11 @@
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     setGroupPostMedia(e.target.result);
-                    setGroupPostMediaType(file.type.startsWith('video/') ? 'video' : 'image');
+                    if (file.type === 'image/gif') {
+                        setGroupPostMediaType('gif');
+                    } else {
+                        setGroupPostMediaType(file.type.startsWith('video/') ? 'video' : 'image');
+                    }
                 };
                 reader.readAsDataURL(file);
             };
@@ -508,9 +555,124 @@
             const clearGroupPostMedia = () => {
                 setGroupPostMedia(null);
                 setGroupPostMediaType('');
+                setIsStickerPickerOpen(false);
                 if (groupMediaInputRef.current) {
                     groupMediaInputRef.current.value = '';
                 }
+            };
+
+            const addGifByUrl = () => {
+                const input = window.prompt('Paste a GIF URL');
+                const gifUrl = (input || '').trim();
+                if (!gifUrl) {
+                    return;
+                }
+
+                if (!/^https?:\/\//i.test(gifUrl)) {
+                    alert('Please enter a valid URL starting with http or https.');
+                    return;
+                }
+
+                setGroupPostMedia(gifUrl);
+                setGroupPostMediaType('gif');
+            };
+
+            const stopGroupCapture = () => {
+                if (groupMediaRecorderRef.current && groupMediaRecorderRef.current.state !== 'inactive') {
+                    groupMediaRecorderRef.current.stop();
+                }
+                setIsRecordingGroupVideo(false);
+
+                if (groupCaptureStreamRef.current) {
+                    groupCaptureStreamRef.current.getTracks().forEach((track) => track.stop());
+                    groupCaptureStreamRef.current = null;
+                }
+
+                if (groupCaptureVideoRef.current) {
+                    groupCaptureVideoRef.current.srcObject = null;
+                }
+                setIsGroupCaptureOpen(false);
+            };
+
+            const openGroupCapture = async (mode) => {
+                try {
+                    setGroupCaptureMode(mode);
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: { ideal: 'environment' } },
+                        audio: mode === 'video',
+                    });
+                    groupCaptureStreamRef.current = stream;
+                    setIsGroupCaptureOpen(true);
+                    setTimeout(() => {
+                        if (groupCaptureVideoRef.current) {
+                            groupCaptureVideoRef.current.srcObject = stream;
+                            groupCaptureVideoRef.current.play().catch(() => {});
+                        }
+                    }, 80);
+                } catch (error) {
+                    console.error('Failed to open group capture:', error);
+                    alert('Could not access camera. Please allow permission or use gallery.');
+                }
+            };
+
+            const captureGroupPhoto = () => {
+                const video = groupCaptureVideoRef.current;
+                const canvas = groupCaptureCanvasRef.current;
+                if (!video || !canvas) {
+                    return;
+                }
+
+                canvas.width = video.videoWidth || 1280;
+                canvas.height = video.videoHeight || 720;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const imageData = canvas.toDataURL('image/jpeg', 0.85);
+                setGroupPostMedia(imageData);
+                setGroupPostMediaType('image');
+                stopGroupCapture();
+            };
+
+            const startGroupVideoRecording = () => {
+                if (!groupCaptureStreamRef.current) {
+                    return;
+                }
+
+                try {
+                    const recorder = new MediaRecorder(groupCaptureStreamRef.current, { mimeType: 'video/webm' });
+                    groupMediaChunksRef.current = [];
+                    recorder.ondataavailable = (event) => {
+                        if (event.data && event.data.size > 0) {
+                            groupMediaChunksRef.current.push(event.data);
+                        }
+                    };
+                    recorder.onstop = () => {
+                        const blob = new Blob(groupMediaChunksRef.current, { type: 'video/webm' });
+                        if (blob.size > 8 * 1024 * 1024) {
+                            alert('Recorded video is too large. Keep it under 8MB.');
+                            return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            setGroupPostMedia(e.target.result);
+                            setGroupPostMediaType('video');
+                        };
+                        reader.readAsDataURL(blob);
+                        stopGroupCapture();
+                    };
+                    groupMediaRecorderRef.current = recorder;
+                    recorder.start();
+                    setIsRecordingGroupVideo(true);
+                } catch (error) {
+                    console.error('Failed to record video:', error);
+                    alert('Video recording is not supported on this browser.');
+                }
+            };
+
+            const stopGroupVideoRecording = () => {
+                if (groupMediaRecorderRef.current && groupMediaRecorderRef.current.state !== 'inactive') {
+                    groupMediaRecorderRef.current.stop();
+                }
+                setIsRecordingGroupVideo(false);
             };
 
             const shareGroupInvite = async () => {
@@ -648,6 +810,14 @@
 
                 window.addEventListener('click', onClickOutside);
                 return () => window.removeEventListener('click', onClickOutside);
+            }, []);
+
+            useEffect(() => {
+                return () => {
+                    if (groupCaptureStreamRef.current) {
+                        groupCaptureStreamRef.current.getTracks().forEach((track) => track.stop());
+                    }
+                };
             }, []);
 
             // Load meals from localStorage on mount
@@ -885,6 +1055,9 @@
                 setGroupPostType('announcement');
                 setGroupPostText('');
                 clearGroupPostMedia();
+                stopGroupCapture();
+                setIsRecordingGroupVideo(false);
+                setIsStickerPickerOpen(false);
             }, [selectedGroupId]);
 
             if (!userProfile) {
@@ -894,6 +1067,7 @@
                             <div className="bg-white rounded-2xl shadow-lg p-8 text-center">
                                 <CtrlAltFitLogo className="h-14 w-14 mx-auto mb-4" />
                                 <h1 className="text-2xl font-bold text-gray-800 mb-2">CTRL-ALT-FIT</h1>
+                                <p className="text-sm font-semibold tracking-wide text-emerald-700 mb-2">Ctrl your senses. Alter your body. Become fit.</p>
                                 <p className="text-sm text-gray-600 mb-6">Sign in with Google to continue.</p>
                                 {authConfigLoading ? (
                                     <p className="text-sm text-gray-500">Loading sign-in...</p>
@@ -1054,6 +1228,7 @@
                                     <CtrlAltFitLogo className="h-11 w-11 shrink-0" />
                                     <div>
                                         <h1 className="text-3xl font-bold text-gray-800">CTRL-ALT-FIT</h1>
+                                        <p className="text-xs font-semibold tracking-wide text-emerald-700">Ctrl your senses. Alter your body. Become fit.</p>
                                         <p className="text-sm font-medium text-gray-700">Welcome, {firstName}</p>
                                         <p className="text-sm text-gray-500">{currentDateLabel}</p>
                                     </div>
@@ -1525,12 +1700,62 @@
                                         )}
                                     </div>
 
-                                    <div className="bg-white rounded-2xl shadow-lg p-5">
-                                        <h3 className="text-lg font-bold text-gray-800 mb-1">Group Chat</h3>
-                                        <p className="text-sm text-gray-500 mb-3">Post announcements and challenges for your group.</p>
+                                    <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+                                        <div className="border-b border-gray-200 px-4 py-3">
+                                            <h3 className="text-lg font-bold text-gray-800">Group Chat</h3>
+                                            <p className="text-xs text-gray-500">Announcements and challenges in chat format.</p>
+                                        </div>
 
-                                        <div className="space-y-2 mb-4">
-                                            <div className="grid grid-cols-2 gap-2">
+                                        <div className="h-96 overflow-y-auto bg-[#e5ddd5] bg-gradient-to-b from-[#e7f1df] to-[#e5ddd5] p-3 space-y-2">
+                                            {groupPosts.length === 0 ? (
+                                                <p className="text-sm text-gray-600 text-center pt-6">No messages yet. Start the conversation.</p>
+                                            ) : (
+                                                groupPosts.slice().reverse().map((post) => {
+                                                    const isMine = post.author?.sub === userProfile?.sub;
+                                                    return (
+                                                        <div key={post.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
+                                                            <div className={`max-w-[82%] rounded-2xl px-3 py-2 shadow-sm ${
+                                                                isMine ? 'bg-[#dcf8c6] rounded-br-md' : 'bg-white rounded-bl-md'
+                                                            }`}>
+                                                                <div className="mb-1 flex items-center gap-2">
+                                                                    {!isMine && <p className="text-[11px] font-semibold text-gray-700">{post.author?.name || 'Member'}</p>}
+                                                                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                                                                        post.type === 'challenge'
+                                                                            ? 'bg-purple-100 text-purple-700'
+                                                                            : post.type === 'sticker'
+                                                                                ? 'bg-amber-100 text-amber-700'
+                                                                                : 'bg-blue-100 text-blue-700'
+                                                                    }`}>
+                                                                        {post.type}
+                                                                    </span>
+                                                                </div>
+                                                                {post.sticker && (
+                                                                    <div className="text-5xl leading-none">{post.sticker}</div>
+                                                                )}
+                                                                {post.text && (
+                                                                    <p className="text-sm text-gray-800 whitespace-pre-wrap">{post.text}</p>
+                                                                )}
+                                                                {post.media && (
+                                                                    <div className="mt-2">
+                                                                        {post.mediaType === 'video' ? (
+                                                                            <video src={post.media} controls className="max-h-64 w-full rounded-lg border border-gray-200 bg-black/5" />
+                                                                        ) : (
+                                                                            <img src={post.media} alt="Post attachment" className="max-h-64 w-full rounded-lg border border-gray-200 object-cover" />
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                                <p className="mt-1 text-right text-[10px] text-gray-500">
+                                                                    {new Date(post.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })
+                                            )}
+                                        </div>
+
+                                        <div className="border-t border-gray-200 bg-white p-3">
+                                            <div className="mb-2 grid grid-cols-2 gap-2">
                                                 <button
                                                     onClick={() => setGroupPostType('announcement')}
                                                     className={`rounded-lg px-3 py-2 text-sm font-semibold ${
@@ -1552,92 +1777,95 @@
                                                     Challenge
                                                 </button>
                                             </div>
-                                            <textarea
-                                                value={groupPostText}
-                                                onChange={(event) => setGroupPostText(event.target.value)}
-                                                placeholder={groupPostType === 'announcement' ? 'Write an announcement...' : 'Write a challenge...'}
-                                                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
-                                                rows={3}
-                                            />
-                                            <div className="flex items-center justify-between gap-2">
-                                                <div className="flex items-center gap-2">
-                                                    <button
-                                                        onClick={() => groupMediaInputRef.current && groupMediaInputRef.current.click()}
-                                                        className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
-                                                    >
-                                                        Attach Media
-                                                    </button>
-                                                    {groupPostMedia && (
-                                                        <button
-                                                            onClick={clearGroupPostMedia}
-                                                            className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
-                                                        >
-                                                            Remove
-                                                        </button>
-                                                    )}
-                                                    <input
-                                                        ref={groupMediaInputRef}
-                                                        type="file"
-                                                        accept="image/*,video/*"
-                                                        onChange={handleGroupMediaFile}
-                                                        className="hidden"
-                                                    />
+
+                                            <div className="mb-2 grid grid-cols-5 gap-2">
+                                                <button
+                                                    onClick={() => setIsStickerPickerOpen((prev) => !prev)}
+                                                    className="rounded-lg border border-gray-300 px-2 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                                                >
+                                                    Sticker
+                                                </button>
+                                                <button
+                                                    onClick={addGifByUrl}
+                                                    className="rounded-lg border border-gray-300 px-2 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                                                >
+                                                    GIF
+                                                </button>
+                                                <button
+                                                    onClick={() => openGroupCapture('photo')}
+                                                    className="rounded-lg border border-gray-300 px-2 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                                                >
+                                                    Photo
+                                                </button>
+                                                <button
+                                                    onClick={() => openGroupCapture('video')}
+                                                    className="rounded-lg border border-gray-300 px-2 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                                                >
+                                                    Video
+                                                </button>
+                                                <button
+                                                    onClick={() => groupMediaInputRef.current && groupMediaInputRef.current.click()}
+                                                    className="rounded-lg border border-gray-300 px-2 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                                                >
+                                                    Gallery
+                                                </button>
+                                                <input
+                                                    ref={groupMediaInputRef}
+                                                    type="file"
+                                                    accept="image/*,video/*"
+                                                    onChange={handleGroupMediaFile}
+                                                    className="hidden"
+                                                />
+                                            </div>
+                                            {isStickerPickerOpen && (
+                                                <div className="mb-2 rounded-xl border border-gray-200 bg-gray-50 p-2">
+                                                    <div className="grid grid-cols-5 gap-2">
+                                                        {stickerOptions.map((sticker) => (
+                                                            <button
+                                                                key={sticker}
+                                                                onClick={() => sendSticker(sticker)}
+                                                                className="rounded-lg border border-gray-200 bg-white py-2 text-2xl hover:bg-gray-100"
+                                                            >
+                                                                {sticker}
+                                                            </button>
+                                                        ))}
+                                                    </div>
                                                 </div>
+                                            )}
+
+                                            <div className="flex items-end gap-2">
+                                                <textarea
+                                                    value={groupPostText}
+                                                    onChange={(event) => setGroupPostText(event.target.value)}
+                                                    placeholder={groupPostType === 'announcement' ? 'Type announcement...' : 'Type challenge...'}
+                                                    className="flex-1 rounded-2xl border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
+                                                    rows={2}
+                                                />
                                                 <button
                                                     onClick={postToGroupChat}
                                                     disabled={!groupPostText.trim() && !groupPostMedia}
-                                                    className="rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:bg-gray-300"
+                                                    className="rounded-2xl bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:bg-gray-300"
                                                 >
-                                                    Post
+                                                    Send
                                                 </button>
                                             </div>
+
                                             {groupPostMedia && (
-                                                <div className="rounded-xl border border-gray-200 p-2">
+                                                <div className="mt-2 rounded-xl border border-gray-200 bg-gray-50 p-2">
+                                                    <div className="mb-2 flex justify-end">
+                                                        <button
+                                                            onClick={clearGroupPostMedia}
+                                                            className="rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-white"
+                                                        >
+                                                            Remove
+                                                        </button>
+                                                    </div>
                                                     {groupPostMediaType === 'video' ? (
                                                         <video src={groupPostMedia} controls className="h-36 w-full rounded-lg object-cover" />
                                                     ) : (
                                                         <img src={groupPostMedia} alt="Post media preview" className="h-36 w-full rounded-lg object-cover" />
                                                     )}
                                                 </div>
-                                            )}
-                                        </div>
-
-                                        <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                                            {groupPosts.length === 0 ? (
-                                                <p className="text-sm text-gray-500">No posts yet. Share your first update.</p>
-                                            ) : (
-                                                groupPosts.map((post) => (
-                                                    <div key={post.id} className="rounded-xl border border-gray-100 p-3">
-                                                        <div className="flex items-center justify-between gap-2 mb-1">
-                                                            <div className="flex items-center gap-2">
-                                                                {post.author?.picture ? (
-                                                                    <img src={post.author.picture} alt={post.author.name || 'Author'} className="h-6 w-6 rounded-full object-cover" />
-                                                                ) : (
-                                                                    <div className="h-6 w-6 rounded-full bg-gray-200"></div>
-                                                                )}
-                                                                <p className="text-sm font-semibold text-gray-800">{post.author?.name || 'Member'}</p>
-                                                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
-                                                                    post.type === 'challenge'
-                                                                        ? 'bg-purple-100 text-purple-700'
-                                                                        : 'bg-blue-100 text-blue-700'
-                                                                }`}>
-                                                                    {post.type}
-                                                                </span>
-                                                            </div>
-                                                            <p className="text-xs text-gray-500">{new Date(post.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p>
-                                                        </div>
-                                                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{post.text}</p>
-                                                        {post.media && (
-                                                            <div className="mt-2">
-                                                                {post.mediaType === 'video' ? (
-                                                                    <video src={post.media} controls className="max-h-64 w-full rounded-lg border border-gray-200 bg-black/5" />
-                                                                ) : (
-                                                                    <img src={post.media} alt="Post attachment" className="max-h-64 w-full rounded-lg border border-gray-200 object-cover" />
-                                                                )}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                ))
                                             )}
                                         </div>
                                     </div>
@@ -1686,6 +1914,59 @@
                                 </div>
                             )}
                         </div>
+                        )}
+
+                        {isGroupCaptureOpen && (
+                            <div className="fixed inset-0 z-[60] bg-black/85 p-4">
+                                <div className="mx-auto flex h-full w-full max-w-md flex-col">
+                                    <div className="mb-2 flex items-center justify-between text-white">
+                                        <p className="text-sm font-semibold">{groupCaptureMode === 'video' ? 'Record Video' : 'Capture Photo'}</p>
+                                        <button
+                                            onClick={stopGroupCapture}
+                                            className="rounded-lg bg-white/15 px-3 py-1 text-xs font-semibold hover:bg-white/25"
+                                        >
+                                            Close
+                                        </button>
+                                    </div>
+                                    <div className="relative flex-1 overflow-hidden rounded-2xl bg-black">
+                                        <video
+                                            ref={groupCaptureVideoRef}
+                                            autoPlay
+                                            playsInline
+                                            muted
+                                            className="h-full w-full object-cover"
+                                        />
+                                    </div>
+                                    <div className="mt-3 flex items-center justify-center gap-3">
+                                        {groupCaptureMode === 'photo' ? (
+                                            <button
+                                                onClick={captureGroupPhoto}
+                                                className="rounded-xl bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700"
+                                            >
+                                                Capture
+                                            </button>
+                                        ) : (
+                                            <>
+                                                {!isRecordingGroupVideo ? (
+                                                    <button
+                                                        onClick={startGroupVideoRecording}
+                                                        className="rounded-xl bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-700"
+                                                    >
+                                                        Start Recording
+                                                    </button>
+                                                ) : (
+                                                    <button
+                                                        onClick={stopGroupVideoRecording}
+                                                        className="rounded-xl bg-yellow-500 px-5 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
+                                                    >
+                                                        Stop Recording
+                                                    </button>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
                         )}
 
                         {isCreateGroupOpen && (
@@ -1871,6 +2152,7 @@
                         />
 
                         <canvas ref={canvasRef} className="hidden" />
+                        <canvas ref={groupCaptureCanvasRef} className="hidden" />
                     </div>
                 </div>
             );
