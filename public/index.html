@@ -109,6 +109,13 @@
             const [authConfigLoading, setAuthConfigLoading] = useState(true);
             const [googleClientId, setGoogleClientId] = useState(window.GOOGLE_CLIENT_ID || '');
             const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+            const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
+            const [profileDraft, setProfileDraft] = useState({
+                name: '',
+                picture: '',
+                age: '',
+                sex: '',
+            });
             const [selectedMealType, setSelectedMealType] = useState('breakfast');
             const [showCamera, setShowCamera] = useState(false);
             const [capturedImage, setCapturedImage] = useState(null);
@@ -117,6 +124,7 @@
             const fileInputRef = useRef(null);
             const googleButtonRef = useRef(null);
             const profileMenuRef = useRef(null);
+            const profilePhotoInputRef = useRef(null);
             const streamRef = useRef(null);
             const stepListenerRef = useRef(null);
             const stepCounterActiveRef = useRef(false);
@@ -135,6 +143,24 @@
                     }
                 }
             }, []);
+
+            useEffect(() => {
+                if (!userProfile || !userProfile.sub) {
+                    return;
+                }
+
+                try {
+                    const overridesRaw = localStorage.getItem(`userProfileOverrides:${userProfile.sub}`);
+                    if (!overridesRaw) {
+                        return;
+                    }
+
+                    const overrides = JSON.parse(overridesRaw);
+                    setUserProfile((prev) => ({ ...prev, ...overrides }));
+                } catch (error) {
+                    console.error('Failed to load user profile overrides:', error);
+                }
+            }, [userProfile?.sub]);
 
             useEffect(() => {
                 const loadConfig = async () => {
@@ -576,8 +602,61 @@
             const firstName = (userProfile?.given_name || userProfile?.name || 'User').split(' ')[0];
 
             const handleEditProfile = () => {
-                alert('Profile editing will be available soon.');
+                setProfileDraft({
+                    name: userProfile?.name || '',
+                    picture: userProfile?.picture || '',
+                    age: userProfile?.age ? String(userProfile.age) : '',
+                    sex: userProfile?.sex || '',
+                });
+                setIsEditProfileOpen(true);
                 setProfileMenuOpen(false);
+            };
+
+            const handleProfileDraftChange = (field, value) => {
+                setProfileDraft((prev) => ({ ...prev, [field]: value }));
+            };
+
+            const handleProfilePhotoFile = (event) => {
+                const file = event.target.files && event.target.files[0];
+                if (!file) {
+                    return;
+                }
+
+                if (!file.type.startsWith('image/')) {
+                    alert('Please select an image file.');
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    handleProfileDraftChange('picture', e.target.result);
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const handleSaveProfile = () => {
+                const ageValue = profileDraft.age === '' ? '' : Math.max(0, Math.round(Number(profileDraft.age) || 0));
+                const nextProfile = {
+                    ...userProfile,
+                    name: profileDraft.name.trim() || userProfile?.name || '',
+                    picture: profileDraft.picture || userProfile?.picture || '',
+                    age: ageValue,
+                    sex: profileDraft.sex || '',
+                };
+
+                setUserProfile(nextProfile);
+                localStorage.setItem('userProfile', JSON.stringify(nextProfile));
+                if (nextProfile.sub) {
+                    const overrides = {
+                        name: nextProfile.name,
+                        picture: nextProfile.picture,
+                        age: nextProfile.age,
+                        sex: nextProfile.sex,
+                    };
+                    localStorage.setItem(`userProfileOverrides:${nextProfile.sub}`, JSON.stringify(overrides));
+                }
+
+                setIsEditProfileOpen(false);
             };
 
             return (
@@ -927,6 +1006,103 @@
                                 </div>
                             )}
                         </div>
+
+                        {isEditProfileOpen && (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                                <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+                                    <div className="border-b border-gray-200 px-5 py-4">
+                                        <h2 className="text-lg font-bold text-gray-800">Edit Profile</h2>
+                                        <p className="text-xs text-gray-500 mt-1">Update your basic details.</p>
+                                    </div>
+
+                                    <div className="space-y-4 px-5 py-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                                            <input
+                                                type="text"
+                                                value={profileDraft.name}
+                                                onChange={(event) => handleProfileDraftChange('name', event.target.value)}
+                                                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
+                                                placeholder="Your full name"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Profile Picture URL</label>
+                                            <input
+                                                type="url"
+                                                value={profileDraft.picture}
+                                                onChange={(event) => handleProfileDraftChange('picture', event.target.value)}
+                                                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
+                                                placeholder="https://..."
+                                            />
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <button
+                                                    onClick={() => profilePhotoInputRef.current && profilePhotoInputRef.current.click()}
+                                                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                                                >
+                                                    Upload Photo
+                                                </button>
+                                                {profileDraft.picture && (
+                                                    <img src={profileDraft.picture} alt="Profile preview" className="h-8 w-8 rounded-full object-cover ring-1 ring-gray-300" />
+                                                )}
+                                            </div>
+                                            <input
+                                                ref={profilePhotoInputRef}
+                                                type="file"
+                                                accept="image/*"
+                                                onChange={handleProfilePhotoFile}
+                                                className="hidden"
+                                            />
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Age</label>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    max="120"
+                                                    value={profileDraft.age}
+                                                    onChange={(event) => handleProfileDraftChange('age', event.target.value)}
+                                                    className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
+                                                    placeholder="e.g. 28"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Sex</label>
+                                                <select
+                                                    value={profileDraft.sex}
+                                                    onChange={(event) => handleProfileDraftChange('sex', event.target.value)}
+                                                    className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
+                                                >
+                                                    <option value="">Select</option>
+                                                    <option value="Female">Female</option>
+                                                    <option value="Male">Male</option>
+                                                    <option value="Other">Other</option>
+                                                    <option value="Prefer not to say">Prefer not to say</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-4">
+                                        <button
+                                            onClick={() => setIsEditProfileOpen(false)}
+                                            className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            onClick={handleSaveProfile}
+                                            className="rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700"
+                                        >
+                                            Save Changes
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         <input
                             ref={fileInputRef}
