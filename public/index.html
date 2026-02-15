@@ -88,6 +88,11 @@
         .dark .bg-gradient-to-br.from-emerald-100.to-emerald-200 {
             background: linear-gradient(135deg, #065f46, #047857) !important;
         }
+        .dark .ai-model-banner {
+            background: linear-gradient(135deg, #0b5a45, #0f766e) !important;
+            border-color: #34d399 !important;
+            color: #f8fafc !important;
+        }
         .dark .text-orange-700, .dark .text-orange-600,
         .dark .text-blue-700, .dark .text-blue-600,
         .dark .text-emerald-700, .dark .text-emerald-600 {
@@ -205,6 +210,7 @@
             const [selectedGroupId, setSelectedGroupId] = useState(null);
             const [isAddMembersOpen, setIsAddMembersOpen] = useState(false);
             const [inviteEmail, setInviteEmail] = useState('');
+            const [isSendingInvites, setIsSendingInvites] = useState(false);
             const [groupViewTab, setGroupViewTab] = useState('leaderboard');
             const [groupPostText, setGroupPostText] = useState('');
             const [groupPostMedia, setGroupPostMedia] = useState(null);
@@ -514,9 +520,8 @@
             };
 
             const sendEmailInvite = async () => {
-                const trimmedEmail = inviteEmail.trim();
                 const inviteUrl = getInviteUrl(selectedGroup);
-                if (!trimmedEmail || !selectedGroup || !inviteUrl) {
+                if (!inviteEmail.trim() || !selectedGroup || !inviteUrl) {
                     return;
                 }
                 if (selectedGroup.ownerSub !== userProfile?.sub) {
@@ -524,27 +529,51 @@
                     return;
                 }
 
-                const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail);
-                if (!emailOk) {
-                    alert('Please enter a valid email address.');
+                const emailList = inviteEmail
+                    .split(/[\s,;]+/)
+                    .map((email) => email.trim())
+                    .filter(Boolean);
+
+                const invalidEmails = emailList.filter((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
+                if (!emailList.length || invalidEmails.length) {
+                    alert('Please enter valid email address(es), separated by commas or new lines.');
                     return;
                 }
 
-                const subject = encodeURIComponent(`Join ${selectedGroup.name} on CTRL-ALT-FIT`);
-                const body = encodeURIComponent(
-                    `Hi,\n\nJoin my group "${selectedGroup.name}" on CTRL-ALT-FIT using this invite link:\n${inviteUrl}\n\nIf supported, you can also scan this invite from the app.\n`
-                );
-                const mailtoHref = `mailto:${trimmedEmail}?subject=${subject}&body=${body}`;
-
                 try {
-                    window.location.href = mailtoHref;
-                    if (navigator.clipboard && navigator.clipboard.writeText) {
-                        await navigator.clipboard.writeText(inviteUrl);
+                    setIsSendingInvites(true);
+                    const response = await fetch('/api/send-group-invite', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            emails: emailList,
+                            groupName: selectedGroup.name,
+                            inviteUrl,
+                        }),
+                    });
+
+                    const data = await response.json();
+                    if (!response.ok && response.status !== 207) {
+                        throw new Error(data?.message || data?.error || 'Failed to send invites');
                     }
+
+                    if (response.status === 207) {
+                        const failedCount = Array.isArray(data?.failed) ? data.failed.length : 0;
+                        const sentCount = Number(data?.sent) || 0;
+                        alert(`Sent ${sentCount} invite(s). ${failedCount} failed.`);
+                    } else {
+                        alert(`Invite sent to ${data?.sent || emailList.length} email(s).`);
+                    }
+
                     setIsAddMembersOpen(false);
                     setInviteEmail('');
                 } catch (error) {
-                    console.error('Failed to open email invite:', error);
+                    console.error('Failed to send email invite:', error);
+                    alert(error.message || 'Failed to send invites.');
+                } finally {
+                    setIsSendingInvites(false);
                 }
             };
 
@@ -1489,7 +1518,7 @@
                                 </div>
                             </div>
 
-                            <div className="mb-4 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                            <div className="ai-model-banner mb-4 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
                                 AI Model: Gemini 2.5 Flash-Lite (Free Tier)
                             </div>
 
@@ -2208,17 +2237,17 @@
                                     </div>
                                     <div className="space-y-3 px-5 py-4">
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                                            <input
-                                                type="email"
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Email(s)</label>
+                                            <textarea
                                                 value={inviteEmail}
                                                 onChange={(event) => setInviteEmail(event.target.value)}
-                                                placeholder="person@example.com"
+                                                placeholder="person1@example.com, person2@example.com"
+                                                rows={3}
                                                 className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-200"
                                             />
                                         </div>
                                         <p className="text-xs text-gray-500">
-                                            This opens your default email app with a prefilled invite.
+                                            Enter one or more emails (comma, space, or new line separated). Invites are sent directly from the app.
                                         </p>
                                     </div>
                                     <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-4">
@@ -2230,10 +2259,10 @@
                                         </button>
                                         <button
                                             onClick={sendEmailInvite}
-                                            disabled={!inviteEmail.trim()}
+                                            disabled={!inviteEmail.trim() || isSendingInvites}
                                             className="rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:bg-gray-300"
                                         >
-                                            Send Invite
+                                            {isSendingInvites ? 'Sending...' : 'Send Invite'}
                                         </button>
                                     </div>
                                 </div>
