@@ -300,6 +300,9 @@
             });
 
             const generateInviteCode = () => Math.random().toString(36).slice(2, 10).toUpperCase();
+            const getInviteUrl = (group) => (
+                group ? `${window.location.origin}${window.location.pathname}?join=${group.inviteCode}` : ''
+            );
 
             useEffect(() => {
                 if (!userProfile) {
@@ -376,8 +379,6 @@
                 setActiveTab('groups');
             };
 
-            const inviteUrl = selectedGroup ? `${window.location.origin}${window.location.pathname}?join=${selectedGroup.inviteCode}` : '';
-
             const openAddMembers = () => {
                 setInviteEmail('');
                 setIsAddMembersOpen(true);
@@ -385,6 +386,7 @@
 
             const sendEmailInvite = async () => {
                 const trimmedEmail = inviteEmail.trim();
+                const inviteUrl = getInviteUrl(selectedGroup);
                 if (!trimmedEmail || !selectedGroup || !inviteUrl) {
                     return;
                 }
