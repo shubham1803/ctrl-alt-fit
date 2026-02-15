@@ -242,8 +242,16 @@
             const streamRef = useRef(null);
             const stepListenerRef = useRef(null);
             const stepCounterActiveRef = useRef(false);
-            const lastMotionYRef = useRef(null);
-            const lastStepTimestampRef = useRef(0);
+            const stepDetectorRef = useRef({
+                gravity: { x: 0, y: 0, z: 0 },
+                hasGravity: false,
+                samples: [],
+                candidateTimes: [],
+                bufferedSteps: 0,
+                walkingConfirmed: false,
+                lastStepTimestamp: 0,
+                lastSampleTs: 0,
+            });
             const googleClientIdConfigured = Boolean(googleClientId && googleClientId.trim());
             const [theme, setTheme] = useState(() => {
                 const saved = localStorage.getItem('theme');
@@ -1020,36 +1028,155 @@
                     return;
                 }
 
-                const threshold = 1.8;
-                const minStepIntervalMs = 450;
+                const minStepIntervalMs = 330;
+                const maxStepIntervalMs = 1300;
+                const minCadenceWindowMs = 5000;
+                const minCadenceStepsToConfirm = 4;
+                const inactivityResetMs = 3500;
+                const minPeakMagnitude = 0.9;
+                const maxRotationRate = 500;
+                const gravityAlpha = 0.86;
+
+                stepDetectorRef.current = {
+                    gravity: { x: 0, y: 0, z: 0 },
+                    hasGravity: false,
+                    samples: [],
+                    candidateTimes: [],
+                    bufferedSteps: 0,
+                    walkingConfirmed: false,
+                    lastStepTimestamp: 0,
+                    lastSampleTs: 0,
+                };
 
                 const onDeviceMotion = (event) => {
-                    const acceleration = event.accelerationIncludingGravity;
-                    if (!acceleration || typeof acceleration.y !== 'number') {
-                        return;
-                    }
-
-                    const y = acceleration.y;
-
-                    // Prime baseline on first reading to avoid false +1 step when enabling.
-                    if (lastMotionYRef.current === null) {
-                        lastMotionYRef.current = y;
-                        return;
-                    }
-
-                    const delta = Math.abs(y - lastMotionYRef.current);
                     const now = Date.now();
-
-                    if (delta > threshold && now - lastStepTimestampRef.current >= minStepIntervalMs) {
-                        lastStepTimestampRef.current = now;
-                        setSteps((prevSteps) => {
-                            const nextSteps = prevSteps + 1;
-                            localStorage.setItem('dailySteps', nextSteps.toString());
-                            return nextSteps;
-                        });
+                    const detector = stepDetectorRef.current;
+                    const acceleration = event.acceleration;
+                    const accelerationIncludingGravity = event.accelerationIncludingGravity;
+                    if (!accelerationIncludingGravity) {
+                        return;
                     }
 
-                    lastMotionYRef.current = y;
+                    // Reset walking state after inactivity to avoid drift and stale cadence.
+                    if (detector.lastSampleTs && now - detector.lastSampleTs > inactivityResetMs) {
+                        detector.samples = [];
+                        detector.candidateTimes = [];
+                        detector.bufferedSteps = 0;
+                        detector.walkingConfirmed = false;
+                        detector.lastStepTimestamp = 0;
+                    }
+                    detector.lastSampleTs = now;
+
+                    const rotationRate = event.rotationRate;
+                    const rotationMagnitude = Math.abs(Number(rotationRate?.alpha) || 0)
+                        + Math.abs(Number(rotationRate?.beta) || 0)
+                        + Math.abs(Number(rotationRate?.gamma) || 0);
+                    if (rotationMagnitude > maxRotationRate) {
+                        return;
+                    }
+
+                    let linX = 0;
+                    let linY = 0;
+                    let linZ = 0;
+                    const hasLinearAcceleration = acceleration
+                        && typeof acceleration.x === 'number'
+                        && typeof acceleration.y === 'number'
+                        && typeof acceleration.z === 'number';
+
+                    if (hasLinearAcceleration) {
+                        linX = acceleration.x;
+                        linY = acceleration.y;
+                        linZ = acceleration.z;
+                    } else {
+                        const ax = Number(accelerationIncludingGravity.x) || 0;
+                        const ay = Number(accelerationIncludingGravity.y) || 0;
+                        const az = Number(accelerationIncludingGravity.z) || 0;
+
+                        if (!detector.hasGravity) {
+                            detector.gravity = { x: ax, y: ay, z: az };
+                            detector.hasGravity = true;
+                        }
+
+                        detector.gravity.x = (gravityAlpha * detector.gravity.x) + ((1 - gravityAlpha) * ax);
+                        detector.gravity.y = (gravityAlpha * detector.gravity.y) + ((1 - gravityAlpha) * ay);
+                        detector.gravity.z = (gravityAlpha * detector.gravity.z) + ((1 - gravityAlpha) * az);
+
+                        linX = ax - detector.gravity.x;
+                        linY = ay - detector.gravity.y;
+                        linZ = az - detector.gravity.z;
+                    }
+
+                    const magnitude = Math.sqrt((linX * linX) + (linY * linY) + (linZ * linZ));
+                    detector.samples.push({ ts: now, magnitude });
+                    if (detector.samples.length > 32) {
+                        detector.samples.shift();
+                    }
+                    if (detector.samples.length < 7) {
+                        return;
+                    }
+
+                    const recent = detector.samples.slice(-24);
+                    const avg = recent.reduce((sum, sample) => sum + sample.magnitude, 0) / recent.length;
+                    const variance = recent.reduce((sum, sample) => {
+                        const diff = sample.magnitude - avg;
+                        return sum + (diff * diff);
+                    }, 0) / recent.length;
+                    const stdDev = Math.sqrt(variance);
+                    const dynamicThreshold = Math.max(minPeakMagnitude, avg + (stdDev * 1.35));
+
+                    const prev2 = detector.samples[detector.samples.length - 3];
+                    const prev1 = detector.samples[detector.samples.length - 2];
+                    const curr = detector.samples[detector.samples.length - 1];
+                    const isPeak = prev1.magnitude > prev2.magnitude
+                        && prev1.magnitude > curr.magnitude
+                        && prev1.magnitude > dynamicThreshold;
+                    if (!isPeak) {
+                        return;
+                    }
+
+                    const peakTs = prev1.ts;
+                    const lastCandidateTs = detector.candidateTimes.length
+                        ? detector.candidateTimes[detector.candidateTimes.length - 1]
+                        : 0;
+                    const interval = lastCandidateTs ? peakTs - lastCandidateTs : 0;
+
+                    if (lastCandidateTs && (interval < minStepIntervalMs || interval > maxStepIntervalMs)) {
+                        if (interval > maxStepIntervalMs) {
+                            detector.candidateTimes = [];
+                            detector.bufferedSteps = 0;
+                            detector.walkingConfirmed = false;
+                        }
+                        return;
+                    }
+
+                    detector.candidateTimes.push(peakTs);
+                    detector.candidateTimes = detector.candidateTimes.filter((ts) => peakTs - ts <= minCadenceWindowMs);
+
+                    if (!detector.walkingConfirmed) {
+                        detector.bufferedSteps += 1;
+                        if (detector.candidateTimes.length >= minCadenceStepsToConfirm) {
+                            detector.walkingConfirmed = true;
+                            setSteps((prevSteps) => {
+                                const nextSteps = prevSteps + detector.bufferedSteps;
+                                localStorage.setItem('dailySteps', nextSteps.toString());
+                                return nextSteps;
+                            });
+                            detector.lastStepTimestamp = peakTs;
+                            detector.bufferedSteps = 0;
+                        }
+                        return;
+                    }
+
+                    if (detector.lastStepTimestamp && (peakTs - detector.lastStepTimestamp) < minStepIntervalMs) {
+                        return;
+                    }
+
+                    detector.lastStepTimestamp = peakTs;
+                    setSteps((prevSteps) => {
+                        const nextSteps = prevSteps + 1;
+                        localStorage.setItem('dailySteps', nextSteps.toString());
+                        return nextSteps;
+                    });
                 };
 
                 stepListenerRef.current = onDeviceMotion;
