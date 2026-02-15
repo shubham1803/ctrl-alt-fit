@@ -247,6 +247,7 @@
                 hasGravity: false,
                 samples: [],
                 candidateTimes: [],
+                stepIntervals: [],
                 bufferedSteps: 0,
                 walkingConfirmed: false,
                 lastStepTimestamp: 0,
@@ -1028,20 +1029,26 @@
                     return;
                 }
 
-                const minStepIntervalMs = 330;
-                const maxStepIntervalMs = 1300;
+                const minStepIntervalMs = 380;
+                const maxStepIntervalMs = 1200;
                 const minCadenceWindowMs = 5000;
-                const minCadenceStepsToConfirm = 4;
+                const minCadenceStepsToConfirm = 5;
                 const inactivityResetMs = 3500;
-                const minPeakMagnitude = 0.9;
-                const maxRotationRate = 500;
-                const gravityAlpha = 0.86;
+                const minPeakMagnitude = 1.05;
+                const maxPeakMagnitude = 4.2;
+                const maxRotationRate = 210;
+                const gravityAlpha = 0.88;
+                const minVerticalShare = 0.58;
+                const maxCadenceStdMs = 140;
+                const minCadenceAvgMs = 430;
+                const maxCadenceAvgMs = 900;
 
                 stepDetectorRef.current = {
                     gravity: { x: 0, y: 0, z: 0 },
                     hasGravity: false,
                     samples: [],
                     candidateTimes: [],
+                    stepIntervals: [],
                     bufferedSteps: 0,
                     walkingConfirmed: false,
                     lastStepTimestamp: 0,
@@ -1061,6 +1068,7 @@
                     if (detector.lastSampleTs && now - detector.lastSampleTs > inactivityResetMs) {
                         detector.samples = [];
                         detector.candidateTimes = [];
+                        detector.stepIntervals = [];
                         detector.bufferedSteps = 0;
                         detector.walkingConfirmed = false;
                         detector.lastStepTimestamp = 0;
@@ -1075,6 +1083,19 @@
                         return;
                     }
 
+                    const ax = Number(accelerationIncludingGravity.x) || 0;
+                    const ay = Number(accelerationIncludingGravity.y) || 0;
+                    const az = Number(accelerationIncludingGravity.z) || 0;
+
+                    if (!detector.hasGravity) {
+                        detector.gravity = { x: ax, y: ay, z: az };
+                        detector.hasGravity = true;
+                    }
+
+                    detector.gravity.x = (gravityAlpha * detector.gravity.x) + ((1 - gravityAlpha) * ax);
+                    detector.gravity.y = (gravityAlpha * detector.gravity.y) + ((1 - gravityAlpha) * ay);
+                    detector.gravity.z = (gravityAlpha * detector.gravity.z) + ((1 - gravityAlpha) * az);
+
                     let linX = 0;
                     let linY = 0;
                     let linZ = 0;
@@ -1088,26 +1109,30 @@
                         linY = acceleration.y;
                         linZ = acceleration.z;
                     } else {
-                        const ax = Number(accelerationIncludingGravity.x) || 0;
-                        const ay = Number(accelerationIncludingGravity.y) || 0;
-                        const az = Number(accelerationIncludingGravity.z) || 0;
-
-                        if (!detector.hasGravity) {
-                            detector.gravity = { x: ax, y: ay, z: az };
-                            detector.hasGravity = true;
-                        }
-
-                        detector.gravity.x = (gravityAlpha * detector.gravity.x) + ((1 - gravityAlpha) * ax);
-                        detector.gravity.y = (gravityAlpha * detector.gravity.y) + ((1 - gravityAlpha) * ay);
-                        detector.gravity.z = (gravityAlpha * detector.gravity.z) + ((1 - gravityAlpha) * az);
-
                         linX = ax - detector.gravity.x;
                         linY = ay - detector.gravity.y;
                         linZ = az - detector.gravity.z;
                     }
 
                     const magnitude = Math.sqrt((linX * linX) + (linY * linY) + (linZ * linZ));
-                    detector.samples.push({ ts: now, magnitude });
+                    const gravityMagnitude = Math.sqrt(
+                        (detector.gravity.x * detector.gravity.x)
+                        + (detector.gravity.y * detector.gravity.y)
+                        + (detector.gravity.z * detector.gravity.z)
+                    );
+                    if (gravityMagnitude < 0.001) {
+                        return;
+                    }
+                    const verticalComponent = Math.abs(
+                        ((linX * detector.gravity.x) + (linY * detector.gravity.y) + (linZ * detector.gravity.z))
+                        / gravityMagnitude
+                    );
+                    const verticalShare = magnitude > 0 ? (verticalComponent / magnitude) : 0;
+                    if (verticalShare < minVerticalShare) {
+                        return;
+                    }
+
+                    detector.samples.push({ ts: now, magnitude: verticalComponent });
                     if (detector.samples.length > 32) {
                         detector.samples.shift();
                     }
@@ -1129,7 +1154,8 @@
                     const curr = detector.samples[detector.samples.length - 1];
                     const isPeak = prev1.magnitude > prev2.magnitude
                         && prev1.magnitude > curr.magnitude
-                        && prev1.magnitude > dynamicThreshold;
+                        && prev1.magnitude > dynamicThreshold
+                        && prev1.magnitude < maxPeakMagnitude;
                     if (!isPeak) {
                         return;
                     }
@@ -1143,6 +1169,7 @@
                     if (lastCandidateTs && (interval < minStepIntervalMs || interval > maxStepIntervalMs)) {
                         if (interval > maxStepIntervalMs) {
                             detector.candidateTimes = [];
+                            detector.stepIntervals = [];
                             detector.bufferedSteps = 0;
                             detector.walkingConfirmed = false;
                         }
@@ -1151,6 +1178,30 @@
 
                     detector.candidateTimes.push(peakTs);
                     detector.candidateTimes = detector.candidateTimes.filter((ts) => peakTs - ts <= minCadenceWindowMs);
+                    if (interval > 0) {
+                        detector.stepIntervals.push(interval);
+                        if (detector.stepIntervals.length > 8) {
+                            detector.stepIntervals.shift();
+                        }
+                    }
+
+                    const recentIntervals = detector.stepIntervals.slice(-4);
+                    if (recentIntervals.length >= 3) {
+                        const intervalAvg = recentIntervals.reduce((sum, value) => sum + value, 0) / recentIntervals.length;
+                        const intervalVar = recentIntervals.reduce((sum, value) => {
+                            const diff = value - intervalAvg;
+                            return sum + (diff * diff);
+                        }, 0) / recentIntervals.length;
+                        const intervalStd = Math.sqrt(intervalVar);
+                        const cadenceConsistent = intervalStd <= maxCadenceStdMs
+                            && intervalAvg >= minCadenceAvgMs
+                            && intervalAvg <= maxCadenceAvgMs;
+                        if (!cadenceConsistent) {
+                            detector.walkingConfirmed = false;
+                            detector.bufferedSteps = 0;
+                            return;
+                        }
+                    }
 
                     if (!detector.walkingConfirmed) {
                         detector.bufferedSteps += 1;
