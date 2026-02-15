@@ -735,6 +735,11 @@
                 setMeals(prev => prev.filter(meal => meal.id !== id));
             };
 
+            useEffect(() => {
+                setGroupPostType('announcement');
+                setGroupPostText('');
+            }, [selectedGroupId]);
+
             if (!userProfile) {
                 return (
                     <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50">
@@ -825,11 +830,6 @@
             const groupPosts = selectedGroup
                 ? [...(Array.isArray(selectedGroup.posts) ? selectedGroup.posts : [])].sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
                 : [];
-
-            useEffect(() => {
-                setGroupPostType('announcement');
-                setGroupPostText('');
-            }, [selectedGroupId]);
 
             const handleEditProfile = () => {
                 setProfileDraft({
