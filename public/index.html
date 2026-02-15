@@ -219,8 +219,9 @@
             const [isMediaMenuOpen, setIsMediaMenuOpen] = useState(false);
             const [isStickerPickerOpen, setIsStickerPickerOpen] = useState(false);
             const [isGroupCaptureOpen, setIsGroupCaptureOpen] = useState(false);
-            const [groupCaptureMode, setGroupCaptureMode] = useState('photo');
             const [isRecordingGroupVideo, setIsRecordingGroupVideo] = useState(false);
+            const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+            const [isShutterPressed, setIsShutterPressed] = useState(false);
             const [selectedMealType, setSelectedMealType] = useState('breakfast');
             const [showCamera, setShowCamera] = useState(false);
             const [capturedImage, setCapturedImage] = useState(null);
@@ -238,6 +239,10 @@
             const groupCaptureStreamRef = useRef(null);
             const groupMediaRecorderRef = useRef(null);
             const groupMediaChunksRef = useRef([]);
+            const voiceMediaRecorderRef = useRef(null);
+            const voiceMediaChunksRef = useRef([]);
+            const voiceHoldActiveRef = useRef(false);
+            const capturePressTimerRef = useRef(null);
             const joinInviteHandledRef = useRef(false);
             const streamRef = useRef(null);
             const stepListenerRef = useRef(null);
@@ -720,10 +725,15 @@
             };
 
             const stopGroupCapture = () => {
+                if (capturePressTimerRef.current) {
+                    clearTimeout(capturePressTimerRef.current);
+                    capturePressTimerRef.current = null;
+                }
                 if (groupMediaRecorderRef.current && groupMediaRecorderRef.current.state !== 'inactive') {
                     groupMediaRecorderRef.current.stop();
                 }
                 setIsRecordingGroupVideo(false);
+                setIsShutterPressed(false);
 
                 if (groupCaptureStreamRef.current) {
                     groupCaptureStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -736,13 +746,20 @@
                 setIsGroupCaptureOpen(false);
             };
 
-            const openGroupCapture = async (mode) => {
+            const openGroupCapture = async () => {
                 try {
-                    setGroupCaptureMode(mode);
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: { ideal: 'environment' } },
-                        audio: mode === 'video',
-                    });
+                    let stream = null;
+                    try {
+                        stream = await navigator.mediaDevices.getUserMedia({
+                            video: { facingMode: { ideal: 'environment' } },
+                            audio: true,
+                        });
+                    } catch (audioError) {
+                        stream = await navigator.mediaDevices.getUserMedia({
+                            video: { facingMode: { ideal: 'environment' } },
+                            audio: false,
+                        });
+                    }
                     groupCaptureStreamRef.current = stream;
                     setIsGroupCaptureOpen(true);
                     setTimeout(() => {
@@ -780,7 +797,12 @@
                 }
 
                 try {
-                    const recorder = new MediaRecorder(groupCaptureStreamRef.current, { mimeType: 'video/webm' });
+                    const supportsWebm = typeof MediaRecorder !== 'undefined'
+                        && MediaRecorder.isTypeSupported
+                        && MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus');
+                    const recorder = supportsWebm
+                        ? new MediaRecorder(groupCaptureStreamRef.current, { mimeType: 'video/webm;codecs=vp8,opus' })
+                        : new MediaRecorder(groupCaptureStreamRef.current);
                     groupMediaChunksRef.current = [];
                     recorder.ondataavailable = (event) => {
                         if (event.data && event.data.size > 0) {
@@ -788,7 +810,9 @@
                         }
                     };
                     recorder.onstop = () => {
-                        const blob = new Blob(groupMediaChunksRef.current, { type: 'video/webm' });
+                        groupMediaRecorderRef.current = null;
+                        const outputMime = recorder.mimeType || 'video/webm';
+                        const blob = new Blob(groupMediaChunksRef.current, { type: outputMime });
                         if (blob.size > 8 * 1024 * 1024) {
                             alert('Recorded video is too large. Keep it under 8MB.');
                             return;
@@ -815,6 +839,96 @@
                     groupMediaRecorderRef.current.stop();
                 }
                 setIsRecordingGroupVideo(false);
+            };
+
+            const handleCapturePressStart = () => {
+                if (!isGroupCaptureOpen || isRecordingGroupVideo) {
+                    return;
+                }
+                setIsShutterPressed(true);
+                if (capturePressTimerRef.current) {
+                    clearTimeout(capturePressTimerRef.current);
+                }
+                capturePressTimerRef.current = setTimeout(() => {
+                    startGroupVideoRecording();
+                }, 220);
+            };
+
+            const handleCapturePressEnd = () => {
+                if (capturePressTimerRef.current) {
+                    clearTimeout(capturePressTimerRef.current);
+                    capturePressTimerRef.current = null;
+                }
+
+                if (isRecordingGroupVideo) {
+                    stopGroupVideoRecording();
+                } else if (isGroupCaptureOpen) {
+                    captureGroupPhoto();
+                }
+
+                setIsShutterPressed(false);
+            };
+
+            const startVoiceRecording = async () => {
+                if (isRecordingVoice || !selectedGroup || !userProfile) {
+                    return;
+                }
+                voiceHoldActiveRef.current = true;
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    if (!voiceHoldActiveRef.current) {
+                        stream.getTracks().forEach((track) => track.stop());
+                        return;
+                    }
+                    const supportsWebm = typeof MediaRecorder !== 'undefined'
+                        && MediaRecorder.isTypeSupported
+                        && MediaRecorder.isTypeSupported('audio/webm;codecs=opus');
+                    const recorder = supportsWebm
+                        ? new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' })
+                        : new MediaRecorder(stream);
+
+                    voiceMediaChunksRef.current = [];
+                    recorder.ondataavailable = (event) => {
+                        if (event.data && event.data.size > 0) {
+                            voiceMediaChunksRef.current.push(event.data);
+                        }
+                    };
+                    recorder.onstop = () => {
+                        stream.getTracks().forEach((track) => track.stop());
+                        voiceMediaRecorderRef.current = null;
+                        const outputMime = recorder.mimeType || 'audio/webm';
+                        const blob = new Blob(voiceMediaChunksRef.current, { type: outputMime });
+                        if (!blob.size) {
+                            return;
+                        }
+                        if (blob.size > 8 * 1024 * 1024) {
+                            alert('Voice note is too large. Please record a shorter message.');
+                            return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            setGroupPostMedia(e.target.result);
+                            setGroupPostMediaType('audio');
+                        };
+                        reader.readAsDataURL(blob);
+                    };
+
+                    voiceMediaRecorderRef.current = recorder;
+                    recorder.start();
+                    setIsRecordingVoice(true);
+                } catch (error) {
+                    console.error('Failed to record voice:', error);
+                    alert('Microphone access denied or unsupported on this browser.');
+                }
+            };
+
+            const stopVoiceRecording = () => {
+                voiceHoldActiveRef.current = false;
+                const recorder = voiceMediaRecorderRef.current;
+                if (recorder && recorder.state !== 'inactive') {
+                    recorder.stop();
+                }
+                setIsRecordingVoice(false);
             };
 
             const shareGroupInvite = async () => {
@@ -956,6 +1070,12 @@
 
             useEffect(() => {
                 return () => {
+                    if (capturePressTimerRef.current) {
+                        clearTimeout(capturePressTimerRef.current);
+                    }
+                    if (voiceMediaRecorderRef.current && voiceMediaRecorderRef.current.state !== 'inactive') {
+                        voiceMediaRecorderRef.current.stop();
+                    }
                     if (groupCaptureStreamRef.current) {
                         groupCaptureStreamRef.current.getTracks().forEach((track) => track.stop());
                     }
@@ -2103,6 +2223,8 @@
                                                                     <div className="mt-2">
                                                                         {post.mediaType === 'video' ? (
                                                                             <video src={post.media} controls className="max-h-64 w-full rounded-lg border border-gray-200 bg-black/5" />
+                                                                        ) : post.mediaType === 'audio' ? (
+                                                                            <audio src={post.media} controls className="w-full" />
                                                                         ) : (
                                                                             <img src={post.media} alt="Post attachment" className="max-h-64 w-full rounded-lg border border-gray-200 object-cover" />
                                                                         )}
@@ -2143,24 +2265,6 @@
                                                             className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-[#2a3942]"
                                                         >
                                                             GIF
-                                                        </button>
-                                                        <button
-                                                            onClick={() => {
-                                                                setIsMediaMenuOpen(false);
-                                                                openGroupCapture('photo');
-                                                            }}
-                                                            className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-[#2a3942]"
-                                                        >
-                                                            Take Photo
-                                                        </button>
-                                                        <button
-                                                            onClick={() => {
-                                                                setIsMediaMenuOpen(false);
-                                                                openGroupCapture('video');
-                                                            }}
-                                                            className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-[#2a3942]"
-                                                        >
-                                                            Record Video
                                                         </button>
                                                         <button
                                                             onClick={() => {
@@ -2218,17 +2322,40 @@
                                                     </button>
                                                 </div>
                                                 <button
-                                                    onClick={() => openGroupCapture('photo')}
+                                                    onClick={openGroupCapture}
                                                     className="h-10 w-10 rounded-full text-2xl text-slate-200"
                                                 >
                                                     📷
                                                 </button>
-                                                <button
-                                                    onClick={groupPostText.trim() || groupPostMedia ? postToGroupChat : undefined}
-                                                    className="h-10 w-10 rounded-full text-2xl text-slate-200"
-                                                >
-                                                    {groupPostText.trim() || groupPostMedia ? '➤' : '🎤'}
-                                                </button>
+                                                {groupPostText.trim() || groupPostMedia ? (
+                                                    <button
+                                                        onClick={postToGroupChat}
+                                                        className="h-10 w-10 rounded-full text-2xl text-slate-200"
+                                                    >
+                                                        ➤
+                                                    </button>
+                                                ) : (
+                                                    <button
+                                                        onPointerDown={(event) => {
+                                                            event.preventDefault();
+                                                            startVoiceRecording();
+                                                        }}
+                                                        onPointerUp={(event) => {
+                                                            event.preventDefault();
+                                                            stopVoiceRecording();
+                                                        }}
+                                                        onPointerCancel={stopVoiceRecording}
+                                                        onPointerLeave={() => {
+                                                            if (isRecordingVoice) {
+                                                                stopVoiceRecording();
+                                                            }
+                                                        }}
+                                                        className={`h-10 w-10 rounded-full text-2xl ${isRecordingVoice ? 'text-red-400' : 'text-slate-200'}`}
+                                                        title={isRecordingVoice ? 'Recording voice note...' : 'Hold to record voice note'}
+                                                    >
+                                                        🎤
+                                                    </button>
+                                                )}
                                             </div>
 
                                             {isStickerPickerOpen && (
@@ -2259,6 +2386,8 @@
                                                     </div>
                                                     {groupPostMediaType === 'video' ? (
                                                         <video src={groupPostMedia} controls className="h-36 w-full rounded-lg object-cover" />
+                                                    ) : groupPostMediaType === 'audio' ? (
+                                                        <audio src={groupPostMedia} controls className="w-full" />
                                                     ) : (
                                                         <img src={groupPostMedia} alt="Post media preview" className="h-36 w-full rounded-lg object-cover" />
                                                     )}
@@ -2321,7 +2450,7 @@
                             <div className="fixed inset-0 z-[60] bg-black/85 p-4">
                                 <div className="mx-auto flex h-full w-full max-w-md flex-col">
                                     <div className="mb-2 flex items-center justify-between text-white">
-                                        <p className="text-sm font-semibold">{groupCaptureMode === 'video' ? 'Record Video' : 'Capture Photo'}</p>
+                                        <p className="text-sm font-semibold">{isRecordingGroupVideo ? 'Recording Video...' : 'Camera'}</p>
                                         <button
                                             onClick={stopGroupCapture}
                                             className="rounded-lg bg-white/15 px-3 py-1 text-xs font-semibold hover:bg-white/25"
@@ -2339,33 +2468,44 @@
                                         />
                                     </div>
                                     <div className="mt-3 flex items-center justify-center gap-3">
-                                        {groupCaptureMode === 'photo' ? (
-                                            <button
-                                                onClick={captureGroupPhoto}
-                                                className="rounded-xl bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700"
-                                            >
-                                                Capture
-                                            </button>
-                                        ) : (
-                                            <>
-                                                {!isRecordingGroupVideo ? (
-                                                    <button
-                                                        onClick={startGroupVideoRecording}
-                                                        className="rounded-xl bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-700"
-                                                    >
-                                                        Start Recording
-                                                    </button>
-                                                ) : (
-                                                    <button
-                                                        onClick={stopGroupVideoRecording}
-                                                        className="rounded-xl bg-yellow-500 px-5 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
-                                                    >
-                                                        Stop Recording
-                                                    </button>
-                                                )}
-                                            </>
-                                        )}
+                                        <button
+                                            onPointerDown={(event) => {
+                                                event.preventDefault();
+                                                handleCapturePressStart();
+                                            }}
+                                            onPointerUp={(event) => {
+                                                event.preventDefault();
+                                                handleCapturePressEnd();
+                                            }}
+                                            onPointerCancel={() => {
+                                                if (isShutterPressed) {
+                                                    handleCapturePressEnd();
+                                                }
+                                            }}
+                                            onPointerLeave={() => {
+                                                if (isShutterPressed) {
+                                                    handleCapturePressEnd();
+                                                }
+                                            }}
+                                            onContextMenu={(event) => {
+                                                event.preventDefault();
+                                                if (isShutterPressed) {
+                                                    handleCapturePressEnd();
+                                                }
+                                            }}
+                                            className={`flex h-16 w-16 items-center justify-center rounded-full border-4 transition-all touch-none ${
+                                                isRecordingGroupVideo
+                                                    ? 'scale-110 border-red-500 bg-red-500/40'
+                                                    : isShutterPressed
+                                                        ? 'scale-105 border-emerald-400 bg-emerald-500/30'
+                                                        : 'border-white bg-white/25'
+                                            }`}
+                                            title="Tap to take photo. Hold to record video."
+                                        >
+                                            <span className={`h-7 w-7 rounded-full ${isRecordingGroupVideo ? 'bg-red-500' : 'bg-white'}`}></span>
+                                        </button>
                                     </div>
+                                    <p className="mt-2 text-center text-xs text-slate-300">Tap for photo. Hold to record video.</p>
                                 </div>
                             </div>
                         )}
