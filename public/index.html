@@ -209,6 +209,7 @@
             const [groupPostText, setGroupPostText] = useState('');
             const [groupPostMedia, setGroupPostMedia] = useState(null);
             const [groupPostMediaType, setGroupPostMediaType] = useState('');
+            const [groupInputVersion, setGroupInputVersion] = useState(0);
             const [isMediaMenuOpen, setIsMediaMenuOpen] = useState(false);
             const [isStickerPickerOpen, setIsStickerPickerOpen] = useState(false);
             const [isGroupCaptureOpen, setIsGroupCaptureOpen] = useState(false);
@@ -224,6 +225,7 @@
             const profileMenuRef = useRef(null);
             const profilePhotoInputRef = useRef(null);
             const groupMediaInputRef = useRef(null);
+            const groupTextInputRef = useRef(null);
             const groupMessagesEndRef = useRef(null);
             const groupCaptureVideoRef = useRef(null);
             const groupCaptureCanvasRef = useRef(null);
@@ -578,6 +580,10 @@
 
                 persistGroups(updated);
                 setGroupPostText('');
+                setGroupInputVersion((prev) => prev + 1);
+                if (groupTextInputRef.current) {
+                    groupTextInputRef.current.value = '';
+                }
                 setGroupPostMedia(null);
                 setGroupPostMediaType('');
                 setIsMediaMenuOpen(false);
@@ -1157,6 +1163,7 @@
                 setIsMediaMenuOpen(false);
                 setIsStickerPickerOpen(false);
                 setGroupViewTab('leaderboard');
+                setGroupInputVersion((prev) => prev + 1);
             }, [selectedGroupId]);
 
             useEffect(() => {
@@ -1859,22 +1866,29 @@
                                     )}
 
                                     {groupViewTab === 'chat' && (
-                                    <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-                                        <div className="h-[62vh] overflow-y-auto bg-[#efeae2] p-3 space-y-2">
+                                    <div className="rounded-2xl shadow-lg overflow-hidden border border-gray-800 bg-[#0b141a]">
+                                        <div
+                                            className="h-[62vh] overflow-y-auto p-3 space-y-2"
+                                            style={{
+                                                backgroundColor: '#0b141a',
+                                                backgroundImage: "radial-gradient(circle at 20px 20px, rgba(255,255,255,0.03) 1px, transparent 1px), radial-gradient(circle at 60px 60px, rgba(255,255,255,0.02) 1px, transparent 1px)",
+                                                backgroundSize: '80px 80px'
+                                            }}
+                                        >
                                             {groupPosts.length === 0 ? (
-                                                <p className="text-xs text-gray-600 text-center pt-6">No messages yet. Start the conversation.</p>
+                                                <p className="text-xs text-slate-400 text-center pt-6">No messages yet. Start the conversation.</p>
                                             ) : (
                                                 groupPosts.slice().reverse().map((post) => {
                                                     const isMine = post.author?.sub === userProfile?.sub;
                                                     return (
                                                         <div key={post.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-                                                            <div className={`max-w-[84%] rounded-lg px-3 py-2 shadow-sm ${
+                                                            <div className={`max-w-[84%] rounded-2xl px-3 py-2 shadow-sm ${
                                                                 isMine
-                                                                    ? (theme === 'dark' ? 'bg-[#1f3d2e] text-slate-100' : 'bg-[#dcf8c6] text-gray-900')
-                                                                    : (theme === 'dark' ? 'bg-slate-700 text-slate-100' : 'bg-white text-gray-900')
+                                                                    ? 'bg-[#005c4b] text-white rounded-br-md'
+                                                                    : 'bg-[#202c33] text-white rounded-bl-md'
                                                             }`}>
                                                                 {!isMine && (
-                                                                    <p className="mb-1 text-[11px] font-semibold text-[#128C7E]">{post.author?.name || 'Member'}</p>
+                                                                    <p className="mb-1 text-[11px] font-semibold text-[#8ec8ff]">{post.author?.name || 'Member'}</p>
                                                                 )}
                                                                 {post.sticker && <div className="text-5xl leading-none">{post.sticker}</div>}
                                                                 {post.text && <p className="text-sm whitespace-pre-wrap">{post.text}</p>}
@@ -1888,7 +1902,7 @@
                                                                     </div>
                                                                 )}
                                                                 <div className="mt-1 flex items-center justify-end gap-1">
-                                                                    <p className="text-[10px] text-gray-500">
+                                                                    <p className="text-[10px] text-slate-300/80">
                                                                         {new Date(post.createdAt).toLocaleString([], { hour: 'numeric', minute: '2-digit' })}
                                                                     </p>
                                                                     {isMine && <span className="text-[10px] text-[#34B7F1]">✓✓</span>}
@@ -1901,28 +1915,16 @@
                                             <div ref={groupMessagesEndRef}></div>
                                         </div>
 
-                                        <div className="border-t border-gray-200 bg-[#f0f2f5] p-2">
+                                        <div className="border-t border-[#1f2c34] bg-[#111b21] p-2">
                                             <div className="mb-2 relative">
-                                                <div className="flex items-center gap-2">
-                                                    <button
-                                                        onClick={() => {
-                                                            setIsMediaMenuOpen((prev) => !prev);
-                                                            setIsStickerPickerOpen(false);
-                                                        }}
-                                                        className="h-9 w-9 rounded-full border border-gray-300 bg-white text-lg font-bold text-gray-700"
-                                                    >
-                                                        +
-                                                    </button>
-                                                    <p className="text-xs text-gray-500">Media</p>
-                                                </div>
                                                 {isMediaMenuOpen && (
-                                                    <div className="absolute left-0 top-11 z-20 w-44 rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden">
+                                                    <div className="absolute bottom-11 left-0 z-20 w-44 rounded-xl border border-[#2a3942] bg-[#202c33] shadow-lg overflow-hidden">
                                                         <button
                                                             onClick={() => {
                                                                 setIsMediaMenuOpen(false);
                                                                 setIsStickerPickerOpen((prev) => !prev);
                                                             }}
-                                                            className="block w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                                                            className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-[#2a3942]"
                                                         >
                                                             Stickers
                                                         </button>
@@ -1931,7 +1933,7 @@
                                                                 setIsMediaMenuOpen(false);
                                                                 addGifByUrl();
                                                             }}
-                                                            className="block w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                                                            className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-[#2a3942]"
                                                         >
                                                             GIF
                                                         </button>
@@ -1940,7 +1942,7 @@
                                                                 setIsMediaMenuOpen(false);
                                                                 openGroupCapture('photo');
                                                             }}
-                                                            className="block w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                                                            className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-[#2a3942]"
                                                         >
                                                             Take Photo
                                                         </button>
@@ -1949,7 +1951,7 @@
                                                                 setIsMediaMenuOpen(false);
                                                                 openGroupCapture('video');
                                                             }}
-                                                            className="block w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                                                            className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-[#2a3942]"
                                                         >
                                                             Record Video
                                                         </button>
@@ -1958,7 +1960,7 @@
                                                                 setIsMediaMenuOpen(false);
                                                                 groupMediaInputRef.current && groupMediaInputRef.current.click();
                                                             }}
-                                                            className="block w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                                                            className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-[#2a3942]"
                                                         >
                                                             Gallery
                                                         </button>
@@ -1973,14 +1975,63 @@
                                                 />
                                             </div>
 
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    onClick={() => {
+                                                        setIsMediaMenuOpen((prev) => !prev);
+                                                        setIsStickerPickerOpen(false);
+                                                    }}
+                                                    className="h-10 w-10 rounded-full text-4xl leading-none text-slate-200"
+                                                >
+                                                    +
+                                                </button>
+                                                <div className="flex flex-1 items-center gap-2 rounded-full bg-[#2a2f32] px-3 py-2">
+                                                    <textarea
+                                                        key={`group-input-${groupInputVersion}`}
+                                                        ref={groupTextInputRef}
+                                                        value={groupPostText}
+                                                        onChange={(event) => setGroupPostText(event.target.value)}
+                                                        onKeyDown={(event) => {
+                                                            if (event.key === 'Enter' && !event.shiftKey) {
+                                                                event.preventDefault();
+                                                                if (groupPostText.trim() || groupPostMedia) {
+                                                                    postToGroupChat();
+                                                                }
+                                                            }
+                                                        }}
+                                                        placeholder="Message"
+                                                        className="flex-1 max-h-24 min-h-[24px] resize-none bg-transparent text-sm text-slate-100 placeholder:text-slate-400 focus:outline-none"
+                                                        rows={1}
+                                                    />
+                                                    <button
+                                                        onClick={() => setIsStickerPickerOpen((prev) => !prev)}
+                                                        className="text-xl text-slate-300"
+                                                    >
+                                                        ☺
+                                                    </button>
+                                                </div>
+                                                <button
+                                                    onClick={() => openGroupCapture('photo')}
+                                                    className="h-10 w-10 rounded-full text-2xl text-slate-200"
+                                                >
+                                                    📷
+                                                </button>
+                                                <button
+                                                    onClick={groupPostText.trim() || groupPostMedia ? postToGroupChat : undefined}
+                                                    className="h-10 w-10 rounded-full text-2xl text-slate-200"
+                                                >
+                                                    {groupPostText.trim() || groupPostMedia ? '➤' : '🎤'}
+                                                </button>
+                                            </div>
+
                                             {isStickerPickerOpen && (
-                                                <div className="mb-2 rounded-xl border border-gray-200 bg-white p-2">
+                                                <div className="mb-2 mt-2 rounded-xl border border-[#2a3942] bg-[#202c33] p-2">
                                                     <div className="grid grid-cols-5 gap-2">
                                                         {stickerOptions.map((sticker) => (
                                                             <button
                                                                 key={sticker}
                                                                 onClick={() => sendSticker(sticker)}
-                                                                className="rounded-lg border border-gray-200 bg-white py-2 text-2xl hover:bg-gray-100"
+                                                                className="rounded-lg border border-[#2a3942] bg-[#111b21] py-2 text-2xl hover:bg-[#2a3942]"
                                                             >
                                                                 {sticker}
                                                             </button>
@@ -1989,29 +2040,12 @@
                                                 </div>
                                             )}
 
-                                            <div className="flex items-end gap-2">
-                                                <textarea
-                                                    value={groupPostText}
-                                                    onChange={(event) => setGroupPostText(event.target.value)}
-                                                    placeholder="Type a message"
-                                                    className="flex-1 max-h-24 min-h-[42px] resize-none rounded-3xl border border-gray-300 bg-white px-4 py-2 text-sm focus:border-[#128C7E] focus:outline-none"
-                                                    rows={1}
-                                                />
-                                                <button
-                                                    onClick={postToGroupChat}
-                                                    disabled={!groupPostText.trim() && !groupPostMedia}
-                                                    className="h-10 w-10 rounded-full bg-[#128C7E] text-white text-sm font-bold hover:bg-[#0f7a6d] disabled:bg-gray-300"
-                                                >
-                                                    ➤
-                                                </button>
-                                            </div>
-
                                             {groupPostMedia && (
-                                                <div className="mt-2 rounded-xl border border-gray-200 bg-white p-2">
+                                                <div className="mt-2 rounded-xl border border-[#2a3942] bg-[#202c33] p-2">
                                                     <div className="mb-2 flex justify-end">
                                                         <button
                                                             onClick={clearGroupPostMedia}
-                                                            className="rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                                                            className="rounded-lg border border-[#3b4a54] px-2 py-1 text-xs font-semibold text-slate-200 hover:bg-[#2a3942]"
                                                         >
                                                             Remove
                                                         </button>
