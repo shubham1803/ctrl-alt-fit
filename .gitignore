@@ -27,3 +27,11 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Expo / React Native
+.expo/
+.expo-shared/
+dist/
+web-build/
+android/
+ios/

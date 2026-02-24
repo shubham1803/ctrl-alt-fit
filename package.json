@@ -1,17 +1,32 @@
 {
-  "name": "meal-tracker-app",
-  "version": "1.0.0",
-  "description": "AI-powered meal tracking app with macro calculations",
+  "name": "ctrl-alt-fit",
+  "version": "2.0.0",
+  "private": true,
+  "description": "CTRL-ALT-FIT cross-platform app (iOS, Android, Web)",
+  "main": "node_modules/expo/AppEntry.js",
   "scripts": {
-    "dev": "vercel dev",
-    "build": "echo 'No build step required'",
-    "deploy": "vercel --prod"
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "dev:api": "vercel dev",
+    "build:web": "expo export --platform web",
+    "deploy:api": "vercel --prod"
   },
-  "keywords": ["meal-tracker", "nutrition", "ai", "vercel"],
-  "author": "",
-  "license": "MIT",
-  "dependencies": {},
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.1.2",
+    "expo": "^53.0.0",
+    "expo-image-picker": "~16.0.6",
+    "expo-sensors": "~14.1.4",
+    "expo-status-bar": "~2.2.3",
+    "react": "18.3.1",
+    "react-native": "0.76.3",
+    "react-native-web": "~0.19.13"
+  },
   "devDependencies": {
+    "@types/react": "~18.3.12",
+    "typescript": "~5.7.2",
     "vercel": "^33.0.0"
   }
 }

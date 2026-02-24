@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "CTRL-ALT-FIT",
+    "slug": "ctrl-alt-fit",
+    "scheme": "ctrlaltfit",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0b1220"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ctrlaltfit.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "CTRL-ALT-FIT uses camera to scan your meals.",
+        "NSPhotoLibraryUsageDescription": "CTRL-ALT-FIT uses your photos to analyze meals.",
+        "NSMicrophoneUsageDescription": "CTRL-ALT-FIT uses microphone for voice notes in group chat."
+      }
+    },
+    "android": {
+      "package": "com.ctrlaltfit.app",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./public/icon.svg"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "replace-with-eas-project-id"
+      }
+    }
+  }
+}
