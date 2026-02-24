@@ -4,9 +4,11 @@
     "slug": "ctrl-alt-fit",
     "scheme": "ctrlaltfit",
     "version": "1.0.0",
+    "icon": "./assets/icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "splash": {
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#0b1220"
     },
@@ -24,6 +26,10 @@
     },
     "android": {
       "package": "com.ctrlaltfit.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0b1220"
+      },
       "permissions": [
         "CAMERA",
         "RECORD_AUDIO"
@@ -31,12 +37,7 @@
     },
     "web": {
       "bundler": "metro",
-      "favicon": "./public/icon.svg"
-    },
-    "extra": {
-      "eas": {
-        "projectId": "replace-with-eas-project-id"
-      }
+      "favicon": "./assets/favicon.png"
     }
   }
 }

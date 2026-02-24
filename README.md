@@ -83,6 +83,9 @@ npm run dev:api
    npx eas submit --platform ios --profile production
    ```
 
+Detailed release checklist:
+- `STORE_RELEASE_CHECKLIST.md`
+
 ## What Was Migrated
 
 - Core meal logging UI

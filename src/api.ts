@@ -14,20 +14,26 @@ const getApiBaseUrl = (): string => {
   throw new Error('Set EXPO_PUBLIC_API_BASE_URL for native builds (e.g. https://your-app.vercel.app).');
 };
 
-export const analyzeMealImage = async (imageData: string): Promise<AnalyzeMealResponse> => {
+const requestJson = async <T>(path: string, init: RequestInit): Promise<T> => {
   const baseUrl = getApiBaseUrl();
-  const response = await fetch(`${baseUrl}/api/analyze-meal`, {
+  const response = await fetch(`${baseUrl}${path}`, init);
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok && response.status !== 207) {
+    throw new Error(data?.message || data?.error || `Request failed (${response.status})`);
+  }
+
+  return data as T;
+};
+
+export const analyzeMealImage = async (imageData: string): Promise<AnalyzeMealResponse> => {
+  const data = await requestJson<Partial<AnalyzeMealResponse>>('/api/analyze-meal', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ imageData }),
   });
-
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data?.message || data?.error || `Analyze failed (${response.status})`);
-  }
 
   return {
     name: String(data?.name || 'Meal'),
@@ -39,4 +45,23 @@ export const analyzeMealImage = async (imageData: string): Promise<AnalyzeMealRe
     fat: Number(data?.fat) || 0,
     fiber: Number(data?.fiber) || 0,
   };
+};
+
+export type InviteSendResult = {
+  sent?: number;
+  failed?: Array<{ email: string; error?: string }>;
+};
+
+export const sendGroupInvites = async (payload: {
+  emails: string[];
+  groupName: string;
+  inviteUrl: string;
+}): Promise<InviteSendResult> => {
+  return requestJson<InviteSendResult>('/api/send-group-invite', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
 };

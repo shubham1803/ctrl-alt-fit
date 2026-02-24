@@ -9,9 +9,14 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "prebuild": "expo prebuild",
     "typecheck": "tsc --noEmit",
     "dev:api": "vercel dev",
     "build:web": "expo export --platform web",
+    "eas:build:android": "eas build --platform android --profile production",
+    "eas:build:ios": "eas build --platform ios --profile production",
+    "eas:submit:android": "eas submit --platform android --profile production",
+    "eas:submit:ios": "eas submit --platform ios --profile production",
     "deploy:api": "vercel --prod"
   },
   "dependencies": {
