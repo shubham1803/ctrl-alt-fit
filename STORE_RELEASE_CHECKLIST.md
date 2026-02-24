@@ -11,6 +11,9 @@
   - `INVITE_FROM_EMAIL` (if using invite emails)
 - App frontend env var:
   - `EXPO_PUBLIC_API_BASE_URL=https://YOUR_API_DOMAIN`
+  - `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`
+  - `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`
+  - `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`
 
 ## 2) One-time project setup
 

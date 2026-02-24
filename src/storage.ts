@@ -79,6 +79,10 @@ export const saveProfile = async (profile: UserProfile): Promise<void> => {
   await AsyncStorage.setItem(STORAGE_KEYS.profile, JSON.stringify(profile));
 };
 
+export const clearProfile = async (): Promise<void> => {
+  await AsyncStorage.removeItem(STORAGE_KEYS.profile);
+};
+
 export const loadGroups = async (): Promise<Group[]> => {
   return parseArray<Group>(await AsyncStorage.getItem(STORAGE_KEYS.groups));
 };

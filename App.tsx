@@ -17,10 +17,13 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import { Pedometer } from 'expo-sensors';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
 
 import { analyzeMealImage, sendGroupInvites } from './src/api';
 import { MEAL_TYPES, STICKER_OPTIONS } from './src/constants';
 import {
+  clearProfile,
   loadGroups,
   loadMeals,
   loadProfile,
@@ -34,6 +37,8 @@ import {
   todayKey,
 } from './src/storage';
 import type { AppTab, Group, GroupChatPost, GroupTab, Meal, MealTypeId, ThemeMode, UserProfile } from './src/types';
+
+WebBrowser.maybeCompleteAuthSession();
 
 const makeId = (prefix: string): string => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -84,6 +89,20 @@ export default function App(): React.JSX.Element {
 
   const [themeMode, setThemeMode] = useState<ThemeMode>('system');
   const isDark = themeMode === 'system' ? osTheme === 'dark' : themeMode === 'dark';
+  const [authError, setAuthError] = useState('');
+
+  const googleWebClientId = (process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '').trim();
+  const googleIosClientId = (process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '').trim();
+  const googleAndroidClientId = (process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '').trim();
+  const googleConfigured = Platform.OS === 'web'
+    ? Boolean(googleWebClientId)
+    : Boolean(googleIosClientId || googleAndroidClientId || googleWebClientId);
+
+  const [googleRequest, googleResponse, promptGoogleSignIn] = Google.useAuthRequest({
+    webClientId: googleWebClientId || undefined,
+    iosClientId: googleIosClientId || undefined,
+    androidClientId: googleAndroidClientId || undefined,
+  });
 
   const [activeTab, setActiveTab] = useState<AppTab>('you');
   const [activeGroupTab, setActiveGroupTab] = useState<GroupTab>('leaderboard');
@@ -124,25 +143,14 @@ export default function App(): React.JSX.Element {
           loadSettings(),
         ]);
 
-        const fallbackProfile: UserProfile = storedProfile || {
-          id: makeId('usr'),
-          name: 'User',
-          email: '',
-          age: '',
-          sex: '',
-          picture: '',
-        };
-
-        setProfile(fallbackProfile);
-        setProfileDraft({
-          name: fallbackProfile.name || '',
-          email: fallbackProfile.email || '',
-          age: fallbackProfile.age || '',
-          sex: fallbackProfile.sex || '',
-        });
-
-        if (!storedProfile) {
-          await saveProfile(fallbackProfile);
+        if (storedProfile) {
+          setProfile(storedProfile);
+          setProfileDraft({
+            name: storedProfile.name || '',
+            email: storedProfile.email || '',
+            age: storedProfile.age || '',
+            sex: storedProfile.sex || '',
+          });
         }
 
         setMeals(storedMeals);
@@ -173,6 +181,59 @@ export default function App(): React.JSX.Element {
       setIsLoading(false);
     });
   }, []);
+
+  useEffect(() => {
+    const signInWithGoogle = async (): Promise<void> => {
+      if (!googleResponse || googleResponse.type !== 'success') {
+        return;
+      }
+
+      const accessToken = googleResponse.authentication?.accessToken;
+      if (!accessToken) {
+        setAuthError('Google sign-in failed to return access token.');
+        return;
+      }
+
+      try {
+        const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Google profile fetch failed (${response.status})`);
+        }
+
+        const data = await response.json();
+        const nextProfile: UserProfile = {
+          id: String(data.sub || makeId('usr')),
+          name: String(data.name || ''),
+          email: String(data.email || ''),
+          picture: String(data.picture || ''),
+          age: '',
+          sex: '',
+        };
+
+        setProfile(nextProfile);
+        setProfileDraft({
+          name: nextProfile.name,
+          email: nextProfile.email,
+          age: '',
+          sex: '',
+        });
+        setAuthError('');
+      } catch (error) {
+        console.error('Google sign-in profile error:', error);
+        setAuthError(error instanceof Error ? error.message : 'Could not load Google profile.');
+      }
+    };
+
+    signInWithGoogle().catch((error) => {
+      console.error('Google sign-in error:', error);
+      setAuthError('Google sign-in failed.');
+    });
+  }, [googleResponse]);
 
   useEffect(() => {
     if (!profile) {
@@ -651,12 +712,46 @@ export default function App(): React.JSX.Element {
 
   const firstName = (profile?.name || 'User').split(' ')[0];
 
-  if (isLoading || !profile) {
+  if (isLoading) {
     return (
       <View style={[styles.root, styles.centered, { backgroundColor: isDark ? '#020617' : '#f8fafc' }]}>
         <StatusBar style={isDark ? 'light' : 'dark'} />
         <ActivityIndicator size="large" color="#10b981" />
         <Text style={{ marginTop: 12, color: isDark ? '#cbd5e1' : '#374151' }}>Loading CTRL-ALT-FIT...</Text>
+      </View>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <View style={[styles.root, styles.centered, { backgroundColor: isDark ? '#020617' : '#f8fafc', paddingHorizontal: 20 }]}>
+        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <Text style={{ color: isDark ? '#f8fafc' : '#111827', fontSize: 30, fontWeight: '900' }}>CTRL-ALT-FIT</Text>
+        <Text style={{ color: isDark ? '#94a3b8' : '#6b7280', marginTop: 6, textAlign: 'center' }}>
+          Sign in with Google to continue.
+        </Text>
+        <Pressable
+          style={[
+            styles.fullBtn,
+            {
+              marginTop: 16,
+              minWidth: 230,
+              backgroundColor: (!googleConfigured || !googleRequest) ? '#6b7280' : '#2563eb',
+            },
+          ]}
+          disabled={!googleConfigured || !googleRequest}
+          onPress={() => promptGoogleSignIn()}
+        >
+          <Text style={styles.primaryBtnText}>Sign In With Google</Text>
+        </Pressable>
+        {!googleConfigured ? (
+          <Text style={{ color: '#f59e0b', marginTop: 10, textAlign: 'center', fontSize: 12 }}>
+            Configure EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID / EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID / EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID
+          </Text>
+        ) : null}
+        {authError ? (
+          <Text style={{ color: '#ef4444', marginTop: 10, textAlign: 'center', fontSize: 12 }}>{authError}</Text>
+        ) : null}
       </View>
     );
   }
@@ -786,6 +881,17 @@ export default function App(): React.JSX.Element {
               );
             })}
           </View>
+          <Pressable
+            style={[styles.fullBtn, { marginTop: 10, backgroundColor: '#b91c1c' }]}
+            onPress={async () => {
+              await clearProfile().catch(() => {});
+              setProfile(null);
+              setIsSettingsOpen(false);
+              setIsProfileEditorOpen(false);
+            }}
+          >
+            <Text style={styles.primaryBtnText}>Sign Out</Text>
+          </Pressable>
         </View>
       )}
 

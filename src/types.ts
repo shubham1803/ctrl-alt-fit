@@ -1,4 +1,4 @@
-export type MealTypeId = 'breakfast' | 'lunch' | 'snack' | 'dinner' | 'other';
+export type MealTypeId = 'breakfast' | 'lunch' | 'dinner' | 'other';
 export type AppTab = 'you' | 'groups';
 export type GroupTab = 'leaderboard' | 'chat';
 export type ThemeMode = 'system' | 'light' | 'dark';

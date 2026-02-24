@@ -41,11 +41,15 @@ Use `.env` (local) or your CI/CD provider env settings:
 ```bash
 GEMINI_API_KEY=your-gemini-key
 EXPO_PUBLIC_API_BASE_URL=https://your-domain.vercel.app
+EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=your-google-web-client-id
+EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=your-google-ios-client-id
+EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=your-google-android-client-id
 ```
 
 Notes:
 - `EXPO_PUBLIC_API_BASE_URL` is required for native apps (Android/iOS).
 - On web, if hosted with the API on same origin, it can be left empty.
+- Google sign-in requires the three `EXPO_PUBLIC_GOOGLE_*_CLIENT_ID` values.
 
 ## Run Locally
 
@@ -99,5 +103,5 @@ Detailed release checklist:
 
 1. Replace placeholder bundle/package IDs in `app.json`.
 2. Add production app icons/splash assets.
-3. Configure Apple/Google sign-in natively if required.
+3. Verify Google OAuth client IDs for web, iOS, and Android are configured.
 4. Run device QA on physical iOS/Android phones.

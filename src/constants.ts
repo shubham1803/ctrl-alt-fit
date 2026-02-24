@@ -3,7 +3,6 @@ import type { MealTypeId } from './types';
 export const MEAL_TYPES: Array<{ id: MealTypeId; label: string; icon: string }> = [
   { id: 'breakfast', label: 'Breakfast', icon: '🌅' },
   { id: 'lunch', label: 'Lunch', icon: '☀️' },
-  { id: 'snack', label: 'Snack', icon: '🍎' },
   { id: 'dinner', label: 'Dinner', icon: '🌙' },
   { id: 'other', label: 'Other', icon: '🍽️' },
 ];
